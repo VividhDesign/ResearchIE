@@ -717,17 +717,38 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
 
     with tab_images:
         st.markdown("### 🖼️ Generated Images & Diagrams")
-        # Render any mermaid code blocks found in report
+        
+        # Show real AI-generated images first
+        generated_images = result.get("generated_images", [])
+        
+        if generated_images:
+            st.markdown(f"**{len(generated_images)} AI-generated image(s):**")
+            for img in generated_images:
+                b64 = img.get("base64_uri", "")
+                caption = img.get("caption", "Generated Image")
+                prompt = img.get("prompt", "")
+                method = img.get("method", "AI")
+                if b64:
+                    st.image(b64, caption=caption, use_container_width=True)
+                    with st.expander(f"🔍 Image prompt used"):
+                        st.markdown(f"**Method:** {method}")
+                        st.markdown(f"**Prompt:** _{prompt}_")
+            st.markdown("---")
+        
+        # Also render any Mermaid diagrams from the report
         import re
         mermaid_blocks = re.findall(r'```mermaid\s+(.*?)\s+```', report_md, re.DOTALL)
         if mermaid_blocks:
+            st.markdown(f"**{len(mermaid_blocks)} Mermaid diagram(s):**")
             for i, block in enumerate(mermaid_blocks):
                 st.markdown(f"**Diagram {i+1}:**")
                 render_mermaid(block)
-        else:
+        
+        if not generated_images and not mermaid_blocks:
             st.info("No images or diagrams were generated for this report.")
 
     with tab_logs:
         st.markdown("### 📜 Full Agent Execution Log")
         log_text = "\n".join(all_logs)
         st.code(log_text, language="text")
+
