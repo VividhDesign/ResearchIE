@@ -44,13 +44,33 @@ def get_fast_llm(temperature: float = 0.1, structured_output=None):
 
 
 def get_embeddings():
-    """Return the embedding model (Gemini text-embedding-004)."""
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    model_name = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
-    if model_name.startswith("models/"):
-        model_name = model_name.replace("models/", "")
-        
-    return GoogleGenerativeAIEmbeddings(
-        model=model_name,
-        google_api_key=os.getenv("GEMINI_API_KEY"),
-    )
+    """Return the embedding model using the google-genai v1 SDK directly.
+
+    Uses google-genai (new SDK, v1 API) instead of langchain's
+    GoogleGenerativeAIEmbeddings which internally calls the v1beta endpoint
+    and may not find all models.
+    """
+    from typing import List
+    from langchain_core.embeddings import Embeddings
+    from google import genai as google_genai
+
+    class _GeminiEmbeddings(Embeddings):
+        def __init__(self, api_key: str, model: str):
+            self._client = google_genai.Client(api_key=api_key)
+            # Strip any 'models/' prefix — the v1 SDK doesn't want it
+            self._model = model.replace("models/", "")
+
+        def embed_query(self, text: str) -> List[float]:
+            result = self._client.models.embed_content(
+                model=self._model,
+                contents=text,
+            )
+            return list(result.embeddings[0].values)
+
+        def embed_documents(self, texts: List[str]) -> List[List[float]]:
+            return [self.embed_query(t) for t in texts]
+
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    model   = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
+    return _GeminiEmbeddings(api_key=api_key, model=model)
+
