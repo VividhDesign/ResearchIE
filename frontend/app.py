@@ -519,15 +519,26 @@ if generate_btn and topic.strip():
     )
 
     try:
+        cumulative_state = initial_state.model_dump()
+        
         # Stream graph execution
         for event in graph.stream(
-            initial_state.model_dump(),
+            cumulative_state,
             stream_mode="updates",
             config={"recursion_limit": 50},
         ):
             for node_name, node_output in event.items():
-                # Update status
                 if isinstance(node_output, dict):
+                    # Aggregate state manually since stream_mode="updates" only yields diffs
+                    for key, value in node_output.items():
+                        if key in ["evidence", "completed_sections", "progress_log"]:
+                            if key not in cumulative_state or not cumulative_state[key]:
+                                cumulative_state[key] = []
+                            cumulative_state[key].extend(value)
+                        else:
+                            cumulative_state[key] = value
+
+                    # Update status
                     status = node_output.get("status", "")
                     if status:
                         status_placeholder.markdown(
@@ -560,7 +571,7 @@ if generate_btn and topic.strip():
 
                     # Capture final state pieces
                     if "final_report" in node_output and node_output["final_report"]:
-                        final_state = node_output
+                        final_state = cumulative_state
 
         # Store result
         if final_state:
