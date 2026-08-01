@@ -1,107 +1,64 @@
-"""Image generation node — uses Gemini Imagen to generate real images for the report."""
+"""Image generation node — generates real images for each report section.
+
+Strategy: 
+- SKIP LLM JSON parsing (too fragile). Instead, derive image prompts directly from 
+  section titles and the topic. This always works even if the LLM is flaky.
+- Use Pollinations.ai as the reliable free generator (no API key, no rate limit).
+- Embed images as base64 data URIs so they survive Streamlit Cloud's ephemeral FS.
+"""
 from __future__ import annotations
 import os
 import re
 import base64
+import urllib.parse
+import requests
 from pathlib import Path
 from datetime import datetime
-from langchain_core.messages import HumanMessage
 from backend.state import ResearchState
-from backend.utils.llm import get_llm, extract_text
 
 
 # ---------------------------------------------------------------------------
-# Step 1 – Image Planner: ask the LLM to place [[IMAGE_N]] placeholders
-# in the markdown and return the prompt for each image.
+# Image generation using Pollinations.ai (free, no API key needed)
 # ---------------------------------------------------------------------------
 
-IMAGE_PLANNER_PROMPT = """You are an expert research report editor and visual content specialist.
-
-You have a completed research report in markdown format. Your job is to:
-1. Identify 2-4 ideal positions in the report where a relevant image would significantly enhance understanding.
-2. Insert a placeholder token like [[IMAGE_1]], [[IMAGE_2]], etc. at each position (right after the section heading or paragraph where it makes most sense).
-3. For EACH placeholder, write a detailed, specific image generation prompt (for an AI image model like Imagen/DALL-E) that describes exactly what the image should show. The prompt must be highly descriptive and specific to the report topic — NOT generic.
-
-Rules:
-- Place images after ## headings or after key explanatory paragraphs, NOT in the middle of sentences.
-- Image prompts must be informative, technical-diagram-style or data-visualization-style, NOT decorative/abstract.
-- Each image prompt should describe a concept, process, comparison, or data visualization related to the exact topic.
-- Format: Insert [[IMAGE_N]] on its own line, then continue the markdown normally.
-
-Return ONLY a JSON object with this exact structure:
-{{
-  "markdown_with_placeholders": "<the full report markdown with [[IMAGE_N]] tokens inserted>",
-  "images": [
-    {{
-      "placeholder": "[[IMAGE_1]]",
-      "prompt": "<detailed image generation prompt>",
-      "caption": "<short caption for the image, max 15 words>"
-    }},
-    ...
-  ]
-}}
-
-Report:
-{report}
-"""
+def _make_image_prompt(topic: str, section_title: str, section_text: str) -> str:
+    """Create a good, specific image prompt from section context."""
+    # Extract key concepts from section text (first 500 chars)
+    snippet = section_text[:500].strip()
+    
+    # Build a prompt that combines topic + section title + key terms
+    base = (
+        f"Professional technical research illustration for topic: '{topic}'. "
+        f"Section: '{section_title}'. "
+        f"Style: clean, modern data visualization or technical diagram, "
+        f"white background, scientific/academic aesthetic, infographic style. "
+        f"NO people or faces. Include relevant charts, graphs, or concept diagrams."
+    )
+    return base
 
 
-def _generate_image_with_gemini(prompt: str, output_path: str) -> bool:
-    """Generate an image using Gemini Imagen API. Returns True on success."""
+def _generate_image_pollinations(prompt: str, output_path: str) -> bool:
+    """Generate an image using Pollinations.ai. Returns True on success."""
     try:
-        import google.generativeai as genai
-        
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return False
-            
-        genai.configure(api_key=api_key)
-        
-        # Use Imagen 3 via the google-generativeai SDK
-        imagen = genai.ImageGenerationModel("imagen-3.0-generate-002")
-        result = imagen.generate_images(
-            prompt=prompt,
-            number_of_images=1,
-            safety_filter_level="block_only_high",
-            person_generation="allow_adult",
-            aspect_ratio="16:9",
+        encoded = urllib.parse.quote(prompt)
+        url = (
+            f"https://image.pollinations.ai/prompt/{encoded}"
+            f"?width=1200&height=675&nologo=true&enhance=true&model=flux"
         )
         
-        if result.images:
-            image = result.images[0]
-            # Save as PNG
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(image._image_bytes)
-            return True
-    except Exception as e:
-        print(f"[image_gen] Imagen generation error: {e}")
-    return False
-
-
-def _generate_image_with_pollinations(prompt: str, output_path: str) -> bool:
-    """Free fallback: generate image using Pollinations.ai (no API key needed)."""
-    try:
-        import requests
-        import urllib.parse
-        
-        encoded = urllib.parse.quote(prompt)
-        # Pollinations.ai — completely free, no rate limits, no API key
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=1200&height=675&nologo=true&enhance=true"
-        
-        resp = requests.get(url, timeout=60)
-        if resp.status_code == 200 and len(resp.content) > 10000:  # at least 10KB
+        resp = requests.get(url, timeout=90)
+        if resp.status_code == 200 and len(resp.content) > 5000:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             with open(output_path, "wb") as f:
                 f.write(resp.content)
             return True
     except Exception as e:
-        print(f"[image_gen] Pollinations fallback error: {e}")
+        print(f"[image_gen] Pollinations error: {e}")
     return False
 
 
-def _image_to_base64(image_path: str) -> str | None:
-    """Convert a saved image to a base64 data URI for inline embedding."""
+def _to_base64_uri(image_path: str) -> str | None:
+    """Convert a saved image file to a base64 data URI."""
     try:
         with open(image_path, "rb") as f:
             data = base64.b64encode(f.read()).decode("utf-8")
@@ -114,116 +71,93 @@ def _image_to_base64(image_path: str) -> str | None:
 
 def image_gen_node(state: ResearchState) -> dict:
     """
-    1. Use LLM to plan image placements (insert [[IMAGE_N]] placeholders).
-    2. For each placeholder, generate a real image using Imagen or Pollinations.
-    3. Replace placeholders in the markdown with actual embedded images.
-    4. Store generated images separately for the UI Images tab.
+    Generate real images using Pollinations.ai for 2-3 key sections.
+    Embeds them as base64 data URIs directly into the stitched_report markdown.
     """
-    import json
-    
     report = state.stitched_report
-    if not report or len(report) < 200:
+    topic = state.topic or "research topic"
+    
+    if not report or len(report) < 100:
         return {
             "stitched_report": report,
-            "progress_log": ["[image_gen] Report too short, skipping image generation."],
-            "status": "📸 Image generation skipped (short report)",
+            "generated_images": [],
+            "progress_log": ["[image_gen] Report too short, skipping."],
+            "status": "📸 Image generation skipped",
         }
 
-    llm = get_llm(temperature=0.4)
+    # --- Pick which sections to illustrate ---
+    # Find ## headings in the report
+    section_matches = list(re.finditer(r'^## (.+)$', report, re.MULTILINE))
     
-    # --- Step 1: Plan image placements ---
-    try:
-        prompt = IMAGE_PLANNER_PROMPT.format(report=report[:8000])  # truncate for token safety
-        response = llm.invoke([HumanMessage(content=prompt)])
-        raw = extract_text(response.content).strip()
-        
-        # Strip code fences if the LLM wrapped in ```json ... ```
-        raw = re.sub(r'^```(?:json)?\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-        
-        plan = json.loads(raw)
-        md_with_placeholders = plan.get("markdown_with_placeholders", report)
-        image_specs = plan.get("images", [])
-    except Exception as e:
+    if not section_matches:
         return {
             "stitched_report": report,
-            "progress_log": [f"[image_gen] Planning failed: {e}. Skipping images."],
-            "status": "📸 Image planning failed",
+            "generated_images": [],
+            "progress_log": ["[image_gen] No sections found to illustrate."],
+            "status": "📸 No sections to illustrate",
         }
     
-    if not image_specs:
-        return {
-            "stitched_report": report,
-            "progress_log": ["[image_gen] No images planned."],
-            "status": "📸 No images to generate",
-        }
-
-    # --- Step 2: Generate images and replace placeholders ---
+    # Pick up to 3 evenly-distributed sections to avoid rate limiting
+    num_to_generate = min(3, len(section_matches))
+    step = max(1, len(section_matches) // num_to_generate)
+    chosen_matches = section_matches[::step][:num_to_generate]
+    
+    # Prepare output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     images_dir = Path(__file__).parent.parent.parent / "data" / "generated_images"
     images_dir.mkdir(parents=True, exist_ok=True)
     
-    generated_images = []  # list of dicts for UI Images tab
+    generated_images = []
     progress = []
-    final_md = md_with_placeholders
-    
-    for i, spec in enumerate(image_specs):
-        placeholder = spec.get("placeholder", f"[[IMAGE_{i+1}]]")
-        img_prompt = spec.get("prompt", "")
-        caption = spec.get("caption", f"Figure {i+1}")
+    final_md = report
+
+    for i, match in enumerate(chosen_matches):
+        section_title = match.group(1).strip()
+        # Get the section body text (up to 800 chars after the heading)
+        start = match.end()
+        next_match = section_matches[section_matches.index(match) + 1] if (section_matches.index(match) + 1 < len(section_matches)) else None
+        end = next_match.start() if next_match else min(start + 800, len(report))
+        section_body = report[start:end].strip()
         
-        if not img_prompt:
-            continue
+        # Build the image prompt
+        img_prompt = _make_image_prompt(topic, section_title, section_body)
+        caption = f"Figure {i+1}: {section_title[:60]}"
         
-        # File path for this image
         img_filename = f"report_{timestamp}_img{i+1}.png"
         img_path = str(images_dir / img_filename)
         
-        success = False
-        method = ""
+        progress.append(f"[image_gen] Generating image {i+1} for '{section_title}'...")
         
-        # Try Gemini Imagen first (requires google-generativeai package)
-        try:
-            import google.generativeai
-            success = _generate_image_with_gemini(img_prompt, img_path)
-            if success:
-                method = "Imagen 3"
-        except ImportError:
-            pass
-        
-        # Fall back to Pollinations.ai (free, no API key needed)
-        if not success:
-            success = _generate_image_with_pollinations(img_prompt, img_path)
-            if success:
-                method = "Pollinations.ai"
+        success = _generate_image_pollinations(img_prompt, img_path)
         
         if success:
-            # Convert to base64 for inline embedding (works on ephemeral Streamlit Cloud)
-            b64_uri = _image_to_base64(img_path)
-            
+            b64_uri = _to_base64_uri(img_path)
             if b64_uri:
-                # Replace placeholder with an actual markdown image tag
-                img_md = f"\n\n![{caption}]({b64_uri})\n*{caption}*\n\n"
-                final_md = final_md.replace(placeholder, img_md)
+                img_tag = f"\n\n![{caption}]({b64_uri})\n\n*{caption}*\n\n"
+                # Inject image right after the ## heading line
+                heading_str = match.group(0)  # "## Section Title"
+                # Only replace the first occurrence
+                final_md = final_md.replace(heading_str, heading_str + img_tag, 1)
+                
                 generated_images.append({
-                    "placeholder": placeholder,
+                    "placeholder": f"[[IMAGE_{i+1}]]",
                     "caption": caption,
                     "prompt": img_prompt,
                     "base64_uri": b64_uri,
-                    "method": method,
+                    "method": "Pollinations.ai (flux)",
+                    "section": section_title,
                 })
-                progress.append(f"📸 Image {i+1} generated via {method}: '{caption}'")
+                progress.append(f"📸 Image {i+1} created for '{section_title}'")
             else:
-                final_md = final_md.replace(placeholder, "")
-                progress.append(f"⚠️ Image {i+1} generated but could not be embedded.")
+                progress.append(f"⚠️ Image {i+1}: generated but base64 encoding failed.")
         else:
-            # Remove the placeholder so the report doesn't have broken tokens
-            final_md = final_md.replace(placeholder, "")
-            progress.append(f"⚠️ Image {i+1} generation failed (all providers exhausted).")
+            progress.append(f"⚠️ Image {i+1}: Pollinations.ai request failed for '{section_title}'.")
+
+    status_msg = f"📸 {len(generated_images)} image(s) generated" if generated_images else "📸 Image generation failed (network error)"
     
     return {
         "stitched_report": final_md,
         "generated_images": generated_images,
-        "status": f"📸 {len(generated_images)} image(s) generated",
-        "progress_log": progress or ["[image_gen] No images were successfully generated."],
+        "status": status_msg,
+        "progress_log": progress,
     }

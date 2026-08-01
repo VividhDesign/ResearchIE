@@ -78,13 +78,21 @@ def section_writer_wrapper(inputs: dict) -> dict:
 
 def finalize_node(state: ResearchState) -> dict:
     """Set the final report and generate PDF."""
+    import re
     from backend.utils.pdf_export import export_to_pdf
 
+    # Use stitched_report (may contain embedded base64 images from image_gen)
     final_report = state.stitched_report
     pdf_path = ""
 
     try:
-        pdf_path = export_to_pdf(final_report, state.plan.title if state.plan else "Research Report")
+        # Strip base64 data URIs before PDF generation (they crash ReportLab)
+        pdf_safe_report = re.sub(r'!\[([^\]]*)\]\(data:[^)]+\)', r'[Image: \1]', final_report)
+        # Also strip mermaid blocks (can't render in PDF)
+        pdf_safe_report = re.sub(r'```mermaid.*?```', '', pdf_safe_report, flags=re.DOTALL)
+        
+        title = state.plan.title if state.plan else "Research Report"
+        pdf_path = export_to_pdf(pdf_safe_report, title)
     except Exception as e:
         print(f"PDF export failed: {e}")
 
