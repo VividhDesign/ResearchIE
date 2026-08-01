@@ -618,9 +618,18 @@ if generate_btn and topic.strip():
             st.rerun()
 
     except Exception as e:
-        st.error(f"❌ Generation failed: {e}")
-        import traceback
-        st.code(traceback.format_exc(), language="python")
+        error_msg = str(e)
+        if "RESOURCE_EXHAUSTED" in error_msg or "429" in error_msg:
+            st.error("❌ **API Rate Limit Reached!**")
+            st.warning(
+                "You have exhausted your free tier quota for the selected model (likely Gemini). "
+                "**Please scroll down to '🤖 Model Settings' and switch the Provider to 'groq'** to continue generating reports using Llama models!"
+            )
+        else:
+            st.error(f"❌ Generation failed: {e}")
+            import traceback
+            with st.expander("Show detailed error log"):
+                st.code(traceback.format_exc(), language="python")
 
 elif generate_btn:
     st.warning("⚠️ Please enter a research topic!")
