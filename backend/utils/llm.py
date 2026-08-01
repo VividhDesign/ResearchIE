@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dotenv import load_dotenv
 
+EMBED_VERSION = "v5-requests-rest"  # Bump this on each embedding code change
+
 load_dotenv()
 
 

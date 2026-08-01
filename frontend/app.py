@@ -337,7 +337,8 @@ with st.sidebar:
                         st.success(f"Indexed {n_chunks} chunks from {len(paths)} file(s)")
                         st.session_state["doc_paths"] = paths
                 except Exception as e:
-                    st.error(f"Indexing failed: {type(e).__name__}: {str(e)}")
+                    from backend.utils.llm import EMBED_VERSION
+                    st.error(f"Indexing failed [{EMBED_VERSION}]: {type(e).__name__}: {str(e)}")
                     st.info("Check that your GEMINI_API_KEY is valid and has access to the Embeddings API.")
 
     st.markdown("---")
