@@ -12,7 +12,7 @@ VECTORSTORE_DIR = Path(__file__).parent.parent.parent / "vectorstore"
 def ingest_documents(file_paths: list[str]) -> int:
     """Chunk and embed documents into the FAISS vector store. Returns number of chunks."""
     from langchain_community.document_loaders import PyPDFLoader, TextLoader
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import FAISS
     from backend.utils.llm import get_embeddings
 
