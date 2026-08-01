@@ -697,7 +697,7 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
         st.markdown("### 🖼️ Generated Images & Diagrams")
         # Render any mermaid code blocks found in report
         import re
-        mermaid_blocks = re.findall(r'```mermaid\n(.*?)\n```', report_md, re.DOTALL)
+        mermaid_blocks = re.findall(r'```mermaid\s+(.*?)\s+```', report_md, re.DOTALL)
         if mermaid_blocks:
             for i, block in enumerate(mermaid_blocks):
                 st.markdown(f"**Diagram {i+1}:**")

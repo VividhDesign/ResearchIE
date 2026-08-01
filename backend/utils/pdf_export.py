@@ -73,8 +73,11 @@ def export_to_pdf(report_markdown: str, title: str) -> str:
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceAfter=16))
     story.append(Spacer(1, 12))
 
+    # Strip out mermaid diagrams since ReportLab cannot render them visually
+    clean_report = re.sub(r'```mermaid.*?```', '', report_markdown, flags=re.DOTALL)
+
     # Parse markdown into ReportLab elements
-    lines = report_markdown.split('\n')
+    lines = clean_report.split('\n')
     for line in lines:
         line = line.strip()
         if not line:
