@@ -46,7 +46,11 @@ def get_fast_llm(temperature: float = 0.1, structured_output=None):
 def get_embeddings():
     """Return the embedding model (Gemini text-embedding-004)."""
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    model_name = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
+    if model_name.startswith("models/"):
+        model_name = model_name.replace("models/", "")
+        
     return GoogleGenerativeAIEmbeddings(
-        model=os.getenv("EMBEDDING_MODEL", "text-embedding-004"),
+        model=model_name,
         google_api_key=os.getenv("GEMINI_API_KEY"),
     )
