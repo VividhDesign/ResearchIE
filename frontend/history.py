@@ -67,3 +67,23 @@ def load_report(filename: str):
             return json.load(f)
     except Exception:
         return None
+
+def delete_report(filename: str):
+    """Delete a specific report by filename."""
+    file_path = HISTORY_DIR / filename
+    if file_path.exists():
+        try:
+            os.remove(file_path)
+            return True
+        except Exception:
+            return False
+    return False
+
+def clear_all_reports():
+    """Delete all saved reports."""
+    _ensure_history_dir()
+    for file_path in HISTORY_DIR.glob("*.json"):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass

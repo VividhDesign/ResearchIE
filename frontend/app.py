@@ -343,7 +343,9 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 📚 Past Research")
+    from frontend.history import list_past_reports, load_report, delete_report, clear_all_reports
     past_reports = list_past_reports()
+    
     if past_reports:
         options = ["Current / New Session"] + [f"{r['topic'][:35]}..." for r in past_reports]
         selected_hist = st.radio("History", options, label_visibility="collapsed")
@@ -351,6 +353,17 @@ with st.sidebar:
         if selected_hist != "Current / New Session":
             idx = options.index(selected_hist) - 1
             rep = past_reports[idx]
+            
+            # Show delete button for selected report
+            if st.button("🗑️ Delete Selected", key="del_selected", use_container_width=True):
+                if delete_report(rep['filename']):
+                    if st.session_state.get("current_loaded_history") == rep['id']:
+                        st.session_state["current_loaded_history"] = "current"
+                        if "report_result" in st.session_state:
+                            del st.session_state["report_result"]
+                        st.session_state["show_report"] = False
+                    st.rerun()
+                    
             if st.session_state.get("current_loaded_history") != rep['id']:
                 data = load_report(rep['filename'])
                 if data:
@@ -367,6 +380,15 @@ with st.sidebar:
                     del st.session_state["report_result"]
                 st.session_state["show_report"] = False
                 st.rerun()
+                
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🗑️ Clear All History", key="clear_history", use_container_width=True):
+            clear_all_reports()
+            st.session_state["current_loaded_history"] = "current"
+            if "report_result" in st.session_state:
+                del st.session_state["report_result"]
+            st.session_state["show_report"] = False
+            st.rerun()
     else:
         st.info("No past research found.")
 
