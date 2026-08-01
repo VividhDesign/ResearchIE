@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dotenv import load_dotenv
 
-EMBED_VERSION = "v5-requests-rest"  # Bump this on each embedding code change
+EMBED_VERSION = "v6-huggingface-local"  # No API key needed, free, works on Streamlit Cloud
 
 load_dotenv()
 
@@ -46,39 +46,20 @@ def get_fast_llm(temperature: float = 0.1, structured_output=None):
 
 
 def get_embeddings():
-    """Return the embedding model using a direct REST API call.
+    """Return HuggingFace local embedding model — no API key required.
     
-    This completely bypasses the Python SDKs to avoid the 'v1beta' 404 bugs 
-    that happen when the SDKs hardcode old API versions.
+    Uses sentence-transformers/all-MiniLM-L6-v2 (~80MB) which runs locally
+    on Streamlit Cloud. Much more reliable than Gemini embeddings which
+    require specific API key scopes that many users don't have.
     """
-    from typing import List
-    from langchain_core.embeddings import Embeddings
-    import requests
-
-    class _GeminiRESTEmbeddings(Embeddings):
-        def __init__(self, api_key: str, model: str):
-            self.api_key = api_key
-            self.model = model.replace("models/", "")
-            # Force v1 API
-            self.url = f"https://generativelanguage.googleapis.com/v1/models/{self.model}:embedContent?key={self.api_key}"
-
-        def embed_query(self, text: str) -> List[float]:
-            resp = requests.post(
-                self.url,
-                json={
-                    "model": f"models/{self.model}",
-                    "content": {"parts": [{"text": text}]}
-                }
-            )
-            if resp.status_code != 200:
-                raise Exception(f"Embedding failed: {resp.text}")
-            return resp.json()["embedding"]["values"]
-
-        def embed_documents(self, texts: List[str]) -> List[List[float]]:
-            # For simplicity, embed sequentially (or you could use batchEmbedContents)
-            return [self.embed_query(t) for t in texts]
-
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    model   = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
-    return _GeminiRESTEmbeddings(api_key=api_key, model=model)
+    from langchain_huggingface import HuggingFaceEmbeddings
+    model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    # If user still has old Gemini model name set, override it
+    if "embedding" in model_name and ("gemini" in model_name or "text-embedding" in model_name or "gecko" in model_name):
+        model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    return HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
 
