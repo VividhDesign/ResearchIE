@@ -47,6 +47,6 @@ def get_embeddings():
     """Return the embedding model (Gemini text-embedding-004)."""
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     return GoogleGenerativeAIEmbeddings(
-        model=os.getenv("EMBEDDING_MODEL", "models/text-embedding-004"),
+        model=os.getenv("EMBEDDING_MODEL", "text-embedding-004"),
         google_api_key=os.getenv("GEMINI_API_KEY"),
     )
