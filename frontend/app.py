@@ -316,7 +316,7 @@ with st.sidebar:
     )
 
     if uploaded_files:
-        if st.button("📥 Index Documents", key="index_docs"):
+        if st.button("Index Documents", key="index_docs"):
             from backend.rag.ingest import ingest_documents
             with st.spinner("Indexing documents..."):
                 paths = []
@@ -327,9 +327,16 @@ with st.sidebar:
                     tmp.write(f.read())
                     tmp.close()
                     paths.append(tmp.name)
-                n_chunks = ingest_documents(paths)
-                st.success(f"✅ Indexed {n_chunks} chunks from {len(paths)} file(s)")
-                st.session_state["doc_paths"] = paths
+                try:
+                    n_chunks = ingest_documents(paths)
+                    if n_chunks == 0:
+                        st.warning("No chunks were indexed. Check your documents.")
+                    else:
+                        st.success(f"Indexed {n_chunks} chunks from {len(paths)} file(s)")
+                        st.session_state["doc_paths"] = paths
+                except Exception as e:
+                    st.error(f"Indexing failed: {type(e).__name__}: {str(e)}")
+                    st.info("Check that your GEMINI_API_KEY is valid and has access to the Embeddings API.")
 
     st.markdown("---")
     st.markdown("### 🤖 Model Settings")
