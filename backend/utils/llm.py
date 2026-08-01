@@ -56,7 +56,10 @@ def get_embeddings():
 
     class _GeminiEmbeddings(Embeddings):
         def __init__(self, api_key: str, model: str):
-            self._client = google_genai.Client(api_key=api_key)
+            self._client = google_genai.Client(
+                api_key=api_key,
+                http_options={'api_version': 'v1'}
+            )
             # Strip any 'models/' prefix — the v1 SDK doesn't want it
             self._model = model.replace("models/", "")
 
