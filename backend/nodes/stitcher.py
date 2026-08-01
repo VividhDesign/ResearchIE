@@ -21,11 +21,19 @@ def stitcher_node(state: ResearchState) -> dict:
     for s in state.completed_sections:
         unique_sections[s.title] = s
 
-    # Order sections according to the plan
+    # Order and filter sections according to the current plan
+    plan_titles = {s.title for s in state.plan.sections}
     plan_order = {s.title: i for i, s in enumerate(state.plan.sections)}
+    
+    # Only keep sections that are part of the current plan
+    valid_sections = [
+        s for s in unique_sections.values() 
+        if s.title in plan_titles
+    ]
+    
     sorted_sections = sorted(
-        unique_sections.values(),
-        key=lambda s: plan_order.get(s.title, 999)
+        valid_sections,
+        key=lambda s: plan_order.get(s.title, 0)
     )
 
     # Format all sections for stitching prompt

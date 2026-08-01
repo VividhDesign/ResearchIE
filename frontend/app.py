@@ -746,7 +746,7 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
         
         # Also render any Mermaid diagrams from the report
         import re
-        mermaid_blocks = re.findall(r'```mermaid\s+(.*?)\s+```', report_md, re.DOTALL)
+        mermaid_blocks = re.findall(r'```mermaid\n(.*?)```', report_md, re.DOTALL)
         if mermaid_blocks:
             st.markdown(f"**{len(mermaid_blocks)} Mermaid diagram(s):**")
             for i, block in enumerate(mermaid_blocks):

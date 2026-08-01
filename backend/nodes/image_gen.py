@@ -21,18 +21,12 @@ from backend.state import ResearchState
 # Image generation using Pollinations.ai (free, no API key needed)
 # ---------------------------------------------------------------------------
 
-def _make_image_prompt(topic: str, section_title: str, section_text: str) -> str:
-    """Create a good, specific image prompt from section context."""
-    # Extract key concepts from section text (first 500 chars)
-    snippet = section_text[:500].strip()
-    
-    # Build a prompt that combines topic + section title + key terms
+def _make_image_prompt(topic: str, section_title: str) -> str:
+    """Create a concise, specific image prompt from section title."""
     base = (
-        f"Professional technical research illustration for topic: '{topic}'. "
-        f"Section: '{section_title}'. "
-        f"Style: clean, modern data visualization or technical diagram, "
-        f"white background, scientific/academic aesthetic, infographic style. "
-        f"NO people or faces. Include relevant charts, graphs, or concept diagrams."
+        f"Scientific diagram or clean data visualization for: '{topic}', focusing on '{section_title}'. "
+        f"White background, professional academic style. "
+        f"NO people, faces, or photos. Abstract data visualization."
     )
     return base
 
@@ -120,7 +114,7 @@ def image_gen_node(state: ResearchState) -> dict:
         section_body = report[start:end].strip()
         
         # Build the image prompt
-        img_prompt = _make_image_prompt(topic, section_title, section_body)
+        img_prompt = _make_image_prompt(topic, section_title)
         caption = f"Figure {i+1}: {section_title[:60]}"
         
         img_filename = f"report_{timestamp}_img{i+1}.png"
