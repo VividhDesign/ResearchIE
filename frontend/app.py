@@ -7,6 +7,7 @@ import sys
 import os
 import time
 import tempfile
+import requests
 from pathlib import Path
 
 # Add project root to path
@@ -256,6 +257,38 @@ def display_progress(logs: list[str], placeholder):
     )
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_gemini_models(api_key: str) -> list[str]:
+    """Fetch available text generation models from Gemini API."""
+    fallback = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+    if not api_key: return fallback
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            models = res.json().get("models", [])
+            valid = [m["name"].replace("models/", "") for m in models if "generateContent" in m.get("supportedGenerationMethods", [])]
+            return sorted(valid, reverse=True) if valid else fallback
+    except:
+        pass
+    return fallback
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_groq_models(api_key: str) -> list[str]:
+    """Fetch available models from Groq API."""
+    fallback = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    if not api_key: return fallback
+    try:
+        res = requests.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
+        if res.status_code == 200:
+            models = res.json().get("data", [])
+            valid = [m["id"] for m in models]
+            return sorted(valid) if valid else fallback
+    except:
+        pass
+    return fallback
+
+
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -301,23 +334,8 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🤖 Model Settings")
 
-    _GEMINI_MODELS = [
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-    ]
-    _GROQ_MODELS = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-70b-versatile",
-        "llama-3.1-8b-instant",
-        "llama3-70b-8192",
-        "mixtral-8x7b-32768",
-        "gemma2-9b-it",
-        "deepseek-r1-distill-llama-70b",
-    ]
+    _GEMINI_MODELS = get_gemini_models(os.getenv("GEMINI_API_KEY", ""))
+    _GROQ_MODELS = get_groq_models(os.getenv("GROQ_API_KEY", ""))
 
     primary_llm = st.selectbox(
         "Provider",
@@ -329,24 +347,30 @@ with st.sidebar:
     os.environ["PRIMARY_LLM"] = primary_llm
 
     if primary_llm == "gemini":
-        default_idx = _GEMINI_MODELS.index(os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
+        default_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        if default_model not in _GEMINI_MODELS:
+            _GEMINI_MODELS.insert(0, default_model)
+        
         chosen_model = st.selectbox(
             "Gemini Model",
             _GEMINI_MODELS,
-            index=default_idx,
+            index=_GEMINI_MODELS.index(default_model),
             key="gemini_model_select",
-            help="gemini-2.5-pro = most capable · gemini-2.0-flash = fast & cheap",
+            help="Select from available Gemini models",
         )
         os.environ["GEMINI_MODEL"] = chosen_model
         st.caption(f"🟣 Using **{chosen_model}**")
     else:
-        default_idx = _GROQ_MODELS.index(os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+        default_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        if default_model not in _GROQ_MODELS:
+            _GROQ_MODELS.insert(0, default_model)
+            
         chosen_model = st.selectbox(
             "Groq Model",
             _GROQ_MODELS,
-            index=default_idx,
+            index=_GROQ_MODELS.index(default_model),
             key="groq_model_select",
-            help="llama-3.3-70b = best quality · llama-3.1-8b-instant = fastest",
+            help="Select from available Groq models",
         )
         os.environ["GROQ_MODEL"] = chosen_model
         st.caption(f"🟠 Using **{chosen_model}**")
