@@ -63,25 +63,34 @@ Instructions:
 - Write for {audience}"""
 
 
-STITCHER_PROMPT = """You are a senior editor assembling a research report from individual sections.
+STITCHER_PROMPT = """You are a senior editor preparing the framing elements for a research report.
 
 Report Title: {title}
 Executive Summary Instructions: {exec_summary_prompt}
 Target Audience: {audience}
 Tone: {tone}
 
-Individual Sections:
+We have already written the main body sections. Here are their summaries/content:
 {sections_content}
 
 Your tasks:
-1. Write a compelling Executive Summary (150-200 words) based on the full report
-2. Ensure smooth transitions between sections
-3. Add a "Key Takeaways" section at the end (5-7 bullet points)
-4. Add a "Sources & References" section listing all cited sources
-5. Format the complete report in clean markdown with proper heading hierarchy
-6. Do NOT rewrite the section content — only stitch and add the framing elements
+1. Write a compelling Executive Summary (150-200 words) based on the sections above.
+2. Write a "Key Takeaways" section (5-7 bullet points) summarizing the most important insights.
+3. Write a "Sources & References" section listing all cited sources you can identify from the sections.
 
-Output the complete, polished research report in markdown."""
+Output ONLY these three framing sections in markdown. Do NOT write or output the main body sections.
+
+Use this exact structure:
+# Executive Summary
+(your text)
+
+# Key Takeaways
+- (point 1)
+- (point 2)
+
+# Sources & References
+- (reference 1)
+"""
 
 
 CRITIC_PROMPT = """You are a rigorous research quality reviewer.

@@ -22,6 +22,7 @@ def diagram_node(state: ResearchState) -> dict:
 
     updated_sections = []
     progress = []
+    stitched = state.stitched_report
 
     for section in state.completed_sections:
         if section.title in needs_diagram_titles:
@@ -46,6 +47,20 @@ def diagram_node(state: ResearchState) -> dict:
                     word_count=section.word_count,
                     diagram_json={"mermaid": mermaid_code},
                 ))
+                
+                # Inject the diagram directly into the stitched report under the relevant heading
+                if stitched:
+                    # Try to insert after the heading
+                    heading_str = f"## {section.title}"
+                    if heading_str in stitched:
+                        stitched = stitched.replace(
+                            heading_str, 
+                            f"{heading_str}\n\n```mermaid\n{mermaid_code}\n```\n"
+                        )
+                    else:
+                        # Fallback: append at end
+                        stitched += f"\n\n```mermaid\n{mermaid_code}\n```\n"
+                        
                 progress.append(f"📊 Diagram generated for: '{section.title}'")
             except Exception as e:
                 updated_sections.append(section)
@@ -55,6 +70,7 @@ def diagram_node(state: ResearchState) -> dict:
 
     return {
         "completed_sections": updated_sections,
+        "stitched_report": stitched,
         "status": "📊 Diagrams generated",
         "progress_log": progress or ["No diagrams needed"],
     }
