@@ -521,6 +521,15 @@ if generate_btn and topic.strip():
     try:
         cumulative_state = initial_state.model_dump()
         
+        def _to_dict(obj):
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            if isinstance(obj, list):
+                return [_to_dict(x) for x in obj]
+            if isinstance(obj, dict):
+                return {k: _to_dict(v) for k, v in obj.items()}
+            return obj
+
         # Stream graph execution
         for event in graph.stream(
             cumulative_state,
@@ -531,12 +540,13 @@ if generate_btn and topic.strip():
                 if isinstance(node_output, dict):
                     # Aggregate state manually since stream_mode="updates" only yields diffs
                     for key, value in node_output.items():
+                        clean_value = _to_dict(value)
                         if key in ["evidence", "completed_sections", "progress_log"]:
                             if key not in cumulative_state or not cumulative_state[key]:
                                 cumulative_state[key] = []
-                            cumulative_state[key].extend(value)
+                            cumulative_state[key].extend(clean_value)
                         else:
-                            cumulative_state[key] = value
+                            cumulative_state[key] = clean_value
 
                     # Update status
                     status = node_output.get("status", "")
