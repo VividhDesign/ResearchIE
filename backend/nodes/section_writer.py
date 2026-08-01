@@ -2,8 +2,35 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
 from backend.state import ResearchState, SectionPlan, SectionResult
-from backend.utils.llm import get_llm, extract_text
+from backend.utils.llm import get_llm
 from backend.utils.prompts import SECTION_WRITER_PROMPT
+
+
+def _to_str(val) -> str:
+    """Convert any LLM response content value to a plain string.
+    
+    Handles: str, list of dicts, list of objects, or anything else.
+    Defined inline so section_writer has zero external dependencies for this.
+    """
+    if isinstance(val, str):
+        return val
+    if isinstance(val, list):
+        out = []
+        for item in val:
+            if isinstance(item, str):
+                out.append(item)
+            elif isinstance(item, dict):
+                # Gemini: {"type": "text", "text": "..."}
+                out.append(str(item.get("text", item.get("content", ""))))
+            elif hasattr(item, "text"):
+                out.append(str(item.text))
+            elif hasattr(item, "content"):
+                out.append(str(item.content))
+            else:
+                out.append(str(item))
+        return "".join(out)
+    # Fallback: stringify whatever it is
+    return str(val)
 
 
 def section_writer_node(state: ResearchState, section: SectionPlan) -> dict:
@@ -36,8 +63,10 @@ def section_writer_node(state: ResearchState, section: SectionPlan) -> dict:
     )
 
     response = llm.invoke([HumanMessage(content=prompt)])
-    content = extract_text(response.content)
-
+    
+    # Safely convert to string — some Gemini models return a list of content blocks
+    content = _to_str(response.content)
+    
     word_count = len(content.split())
 
     result = SectionResult(
