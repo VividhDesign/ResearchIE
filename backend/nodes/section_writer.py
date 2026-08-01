@@ -2,7 +2,7 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
 from backend.state import ResearchState, SectionPlan, SectionResult
-from backend.utils.llm import get_llm
+from backend.utils.llm import get_llm, extract_text
 from backend.utils.prompts import SECTION_WRITER_PROMPT
 
 
@@ -36,7 +36,7 @@ def section_writer_node(state: ResearchState, section: SectionPlan) -> dict:
     )
 
     response = llm.invoke([HumanMessage(content=prompt)])
-    content = response.content
+    content = extract_text(response.content)
 
     word_count = len(content.split())
 

@@ -8,6 +8,27 @@ EMBED_VERSION = "v6-huggingface-local"  # No API key needed, free, works on Stre
 load_dotenv()
 
 
+def extract_text(content) -> str:
+    """Safely extract a plain string from an LLM response's .content field.
+
+    Some backends (Gemini, newer LangChain versions) return a list of
+    content blocks instead of a plain string. This normalises it.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(block.get("text", ""))
+            elif hasattr(block, "text"):
+                parts.append(block.text)
+        return "".join(parts)
+    return str(content)
+
+
 def get_llm(temperature: float = 0.3, structured_output=None):
     """Return the primary LLM (Gemini or Groq) with optional structured output."""
     provider = os.getenv("PRIMARY_LLM", "gemini").lower()

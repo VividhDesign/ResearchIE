@@ -2,7 +2,7 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
 from backend.state import ResearchState
-from backend.utils.llm import get_llm
+from backend.utils.llm import get_llm, extract_text
 from backend.utils.prompts import STITCHER_PROMPT
 
 
@@ -38,7 +38,7 @@ def stitcher_node(state: ResearchState) -> dict:
     )
 
     response = llm.invoke([HumanMessage(content=prompt)])
-    stitched = response.content
+    stitched = extract_text(response.content)
 
     total_words = sum(s.word_count for s in sorted_sections)
 

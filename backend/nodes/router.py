@@ -2,7 +2,7 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
 from backend.state import ResearchState
-from backend.utils.llm import get_fast_llm
+from backend.utils.llm import get_fast_llm, extract_text
 from backend.utils.prompts import ROUTER_PROMPT
 
 
@@ -16,7 +16,7 @@ def router_node(state: ResearchState) -> dict:
     )
 
     response = llm.invoke([HumanMessage(content=prompt)])
-    route_text = response.content.strip().lower()
+    route_text = extract_text(response.content).strip().lower()
 
     # Validate route
     valid_routes = {"closed", "web", "rag", "hybrid"}

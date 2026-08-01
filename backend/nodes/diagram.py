@@ -2,7 +2,7 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
 from backend.state import ResearchState
-from backend.utils.llm import get_fast_llm
+from backend.utils.llm import get_fast_llm, extract_text
 from backend.utils.prompts import DIAGRAM_PROMPT
 
 
@@ -31,7 +31,7 @@ def diagram_node(state: ResearchState) -> dict:
                     section_content=section.content[:2000],
                 )
                 response = llm.invoke([HumanMessage(content=prompt)])
-                mermaid_code = response.content.strip()
+                mermaid_code = extract_text(response.content).strip()
 
                 # Clean up code fences if present
                 if mermaid_code.startswith("```"):
