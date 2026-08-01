@@ -44,36 +44,39 @@ def get_fast_llm(temperature: float = 0.1, structured_output=None):
 
 
 def get_embeddings():
-    """Return the embedding model using the google-genai v1 SDK directly.
-
-    Uses google-genai (new SDK, v1 API) instead of langchain's
-    GoogleGenerativeAIEmbeddings which internally calls the v1beta endpoint
-    and may not find all models.
+    """Return the embedding model using a direct REST API call.
+    
+    This completely bypasses the Python SDKs to avoid the 'v1beta' 404 bugs 
+    that happen when the SDKs hardcode old API versions.
     """
     from typing import List
     from langchain_core.embeddings import Embeddings
-    from google import genai as google_genai
+    import requests
 
-    class _GeminiEmbeddings(Embeddings):
+    class _GeminiRESTEmbeddings(Embeddings):
         def __init__(self, api_key: str, model: str):
-            self._client = google_genai.Client(
-                api_key=api_key,
-                http_options={'api_version': 'v1'}
-            )
-            # Strip any 'models/' prefix — the v1 SDK doesn't want it
-            self._model = model.replace("models/", "")
+            self.api_key = api_key
+            self.model = model.replace("models/", "")
+            # Force v1 API
+            self.url = f"https://generativelanguage.googleapis.com/v1/models/{self.model}:embedContent?key={self.api_key}"
 
         def embed_query(self, text: str) -> List[float]:
-            result = self._client.models.embed_content(
-                model=self._model,
-                contents=text,
+            resp = requests.post(
+                self.url,
+                json={
+                    "model": f"models/{self.model}",
+                    "content": {"parts": [{"text": text}]}
+                }
             )
-            return list(result.embeddings[0].values)
+            if resp.status_code != 200:
+                raise Exception(f"Embedding failed: {resp.text}")
+            return resp.json()["embedding"]["values"]
 
         def embed_documents(self, texts: List[str]) -> List[List[float]]:
+            # For simplicity, embed sequentially (or you could use batchEmbedContents)
             return [self.embed_query(t) for t in texts]
 
     api_key = os.getenv("GEMINI_API_KEY", "")
     model   = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
-    return _GeminiEmbeddings(api_key=api_key, model=model)
+    return _GeminiRESTEmbeddings(api_key=api_key, model=model)
 
