@@ -292,13 +292,56 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 🤖 Model Settings")
+
+    _GEMINI_MODELS = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+    _GROQ_MODELS = [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile",
+        "llama-3.1-8b-instant",
+        "llama3-70b-8192",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+        "deepseek-r1-distill-llama-70b",
+    ]
+
     primary_llm = st.selectbox(
-        "Primary LLM",
+        "Provider",
         ["gemini", "groq"],
         index=0,
         key="primary_llm",
+        help="Choose the LLM provider for report generation",
     )
     os.environ["PRIMARY_LLM"] = primary_llm
+
+    if primary_llm == "gemini":
+        default_idx = _GEMINI_MODELS.index(os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
+        chosen_model = st.selectbox(
+            "Gemini Model",
+            _GEMINI_MODELS,
+            index=default_idx,
+            key="gemini_model_select",
+            help="gemini-2.5-pro = most capable · gemini-2.0-flash = fast & cheap",
+        )
+        os.environ["GEMINI_MODEL"] = chosen_model
+        st.caption(f"🟣 Using **{chosen_model}**")
+    else:
+        default_idx = _GROQ_MODELS.index(os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+        chosen_model = st.selectbox(
+            "Groq Model",
+            _GROQ_MODELS,
+            index=default_idx,
+            key="groq_model_select",
+            help="llama-3.3-70b = best quality · llama-3.1-8b-instant = fastest",
+        )
+        os.environ["GROQ_MODEL"] = chosen_model
+        st.caption(f"🟠 Using **{chosen_model}**")
 
     st.markdown("---")
     st.markdown("### 🗑️ Manage Knowledge Base")
