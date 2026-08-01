@@ -15,6 +15,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+# ── Streamlit Cloud: sync st.secrets → os.environ ─────────────────────────────
+# On Streamlit Cloud there is no .env file; API keys live in st.secrets.
+# We copy them into os.environ so all backend os.getenv() calls work unchanged.
+_SECRET_KEYS = [
+    "GEMINI_API_KEY", "GROQ_API_KEY", "TAVILY_API_KEY",
+    "PRIMARY_LLM", "GEMINI_MODEL", "GROQ_MODEL", "EMBEDDING_MODEL",
+    "CHUNK_SIZE", "CHUNK_OVERLAP", "RAG_TOP_K",
+    "MAX_CRITIQUE_RETRIES", "MAX_SECTIONS",
+]
+for _k in _SECRET_KEYS:
+    if _k not in os.environ:
+        try:
+            os.environ[_k] = str(st.secrets[_k])
+        except (KeyError, FileNotFoundError):
+            pass  # Not present in secrets — will fail gracefully at runtime
+
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Research Intelligence Engine",
