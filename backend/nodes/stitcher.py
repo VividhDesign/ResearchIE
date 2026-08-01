@@ -16,10 +16,15 @@ def stitcher_node(state: ResearchState) -> dict:
             "progress_log": ["Stitcher: No sections to merge!"],
         }
 
+    # Deduplicate sections (keep the latest version of each title)
+    unique_sections = {}
+    for s in state.completed_sections:
+        unique_sections[s.title] = s
+
     # Order sections according to the plan
     plan_order = {s.title: i for i, s in enumerate(state.plan.sections)}
     sorted_sections = sorted(
-        state.completed_sections,
+        unique_sections.values(),
         key=lambda s: plan_order.get(s.title, 999)
     )
 

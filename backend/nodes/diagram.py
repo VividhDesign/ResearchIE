@@ -24,7 +24,12 @@ def diagram_node(state: ResearchState) -> dict:
     progress = []
     stitched = state.stitched_report
 
-    for section in state.completed_sections:
+    # Deduplicate sections so we don't generate diagrams multiple times for the same section
+    unique_sections = {}
+    for s in state.completed_sections:
+        unique_sections[s.title] = s
+
+    for section in unique_sections.values():
         if section.title in needs_diagram_titles:
             try:
                 prompt = DIAGRAM_PROMPT.format(
@@ -64,7 +69,17 @@ def diagram_node(state: ResearchState) -> dict:
                 progress.append(f"📊 Diagram generated for: '{section.title}'")
             except Exception as e:
                 updated_sections.append(section)
-                progress.append(f"Diagram generation failed for '{section.title}': {e}")
+                error_msg = f"Diagram generation failed for '{section.title}' (Rate limit or API error)"
+                progress.append(error_msg)
+                
+                # Append error into the report so the user sees WHY the diagram is missing
+                if stitched:
+                    heading_str = f"## {section.title}"
+                    if heading_str in stitched:
+                        stitched = stitched.replace(
+                            heading_str, 
+                            f"{heading_str}\n\n> ⚠️ **{error_msg}**\n\n"
+                        )
         else:
             updated_sections.append(section)
 
