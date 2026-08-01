@@ -6,9 +6,9 @@ enableCORS = false
 [theme]
 base = "dark"
 primaryColor = "#8b5cf6"
-backgroundColor = "#0a0a14"
-secondaryBackgroundColor = "#0d0d1a"
-textColor = "#e8e8f0"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#000000"
+textColor = "#FFFFFF"
 font = "sans serif"
 
 [browser]

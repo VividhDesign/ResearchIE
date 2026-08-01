@@ -46,16 +46,16 @@ st.markdown("""
 
     /* Global */
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background: #0a0a14; color: #e8e8f0; }
+    .stApp { background: #000000; color: #ffffff; }
 
     /* Sidebar */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0d0d1a 0%, #111128 100%);
-        border-right: 1px solid #1e1e3f;
+        background: #000000 !important;
+        border-right: 1px solid #333333;
     }
     [data-testid="stSidebar"] .stMarkdown h1,
     [data-testid="stSidebar"] .stMarkdown h2,
-    [data-testid="stSidebar"] .stMarkdown h3 { color: #a78bfa; }
+    [data-testid="stSidebar"] .stMarkdown h3 { color: #ffffff; }
 
     /* Main header */
     .rie-header {
@@ -96,8 +96,8 @@ st.markdown("""
 
     /* Progress log */
     .progress-box {
-        background: #0d0d1a;
-        border: 1px solid #1e1e3f;
+        background: #000000;
+        border: 1px solid #333333;
         border-radius: 10px;
         padding: 16px;
         font-family: 'JetBrains Mono', monospace;
@@ -112,9 +112,9 @@ st.markdown("""
 
     /* Section card */
     .section-card {
-        background: linear-gradient(135deg, #111128, #0d0d1a);
-        border: 1px solid #1e1e3f;
-        border-left: 3px solid #a78bfa;
+        background: #000000;
+        border: 1px solid #333333;
+        border-left: 3px solid #ffffff;
         border-radius: 12px;
         padding: 20px 24px;
         margin: 16px 0;
@@ -139,8 +139,8 @@ st.markdown("""
 
     /* Report display */
     .report-container {
-        background: #0d1117;
-        border: 1px solid #21262d;
+        background: #000000;
+        border: 1px solid #333333;
         border-radius: 12px;
         padding: 32px 40px;
         line-height: 1.8;
@@ -156,8 +156,8 @@ st.markdown("""
     .metric-row { display: flex; gap: 16px; margin: 20px 0; }
     .metric-card {
         flex: 1;
-        background: linear-gradient(135deg, #111128, #0d0d1a);
-        border: 1px solid #1e1e3f;
+        background: #000000;
+        border: 1px solid #333333;
         border-radius: 10px;
         padding: 16px 20px;
         text-align: center;
@@ -184,9 +184,9 @@ st.markdown("""
     }
 
     /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] { background: #0d0d1a; border-bottom: 1px solid #1e1e3f; }
-    .stTabs [data-baseweb="tab"] { color: #64748b; }
-    .stTabs [aria-selected="true"] { color: #a78bfa; border-bottom: 2px solid #a78bfa; }
+    .stTabs [data-baseweb="tab-list"] { background: #000000; border-bottom: 1px solid #333333; }
+    .stTabs [data-baseweb="tab"] { color: #888888; }
+    .stTabs [aria-selected="true"] { color: #ffffff; border-bottom: 2px solid #ffffff; }
 
     /* File uploader */
     [data-testid="stFileUploader"] {
@@ -198,9 +198,9 @@ st.markdown("""
 
     /* Input fields */
     .stTextInput input, .stTextArea textarea, .stSelectbox select {
-        background: #111128 !important;
-        border-color: #1e1e3f !important;
-        color: #e8e8f0 !important;
+        background: #000000 !important;
+        border-color: #333333 !important;
+        color: #ffffff !important;
     }
     .stTextInput input:focus { border-color: #7c3aed !important; }
 
@@ -209,12 +209,22 @@ st.markdown("""
 
     /* Diagram container */
     .diagram-box {
-        background: #0d0d1a;
-        border: 1px solid #1e1e3f;
+        background: #000000;
+        border: 1px solid #333333;
         border-radius: 10px;
         padding: 20px;
         margin: 12px 0;
         overflow-x: auto;
+    }
+
+    /* Fix dropdown scroll */
+    ul[data-baseweb="menu"] {
+        max-height: 250px !important;
+        overflow-y: auto !important;
+    }
+    div[data-baseweb="popover"] {
+        max-height: 250px !important;
+        overflow-y: auto !important;
     }
 </style>
 """, unsafe_allow_html=True)
