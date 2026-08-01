@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Streamlit Cloud: sync st.secrets → os.environ ─────────────────────────────
+from frontend.history import save_report, list_past_reports, load_report
+
+# ─── Streamlit Cloud: sync st.secrets → os.environ ─────────────────────────────
 # On Streamlit Cloud there is no .env file; API keys live in st.secrets.
 # We copy them into os.environ so all backend os.getenv() calls work unchanged.
 _SECRET_KEYS = [
@@ -339,6 +341,35 @@ with st.sidebar:
                     st.info("Check that your GEMINI_API_KEY is valid and has access to the Embeddings API.")
 
     st.markdown("---")
+    st.markdown("### 📚 Past Research")
+    past_reports = list_past_reports()
+    if past_reports:
+        options = ["Current / New Session"] + [f"{r['topic'][:35]}..." for r in past_reports]
+        selected_hist = st.radio("History", options, label_visibility="collapsed")
+        
+        if selected_hist != "Current / New Session":
+            idx = options.index(selected_hist) - 1
+            rep = past_reports[idx]
+            if st.session_state.get("current_loaded_history") != rep['id']:
+                data = load_report(rep['filename'])
+                if data:
+                    st.session_state["report_result"] = data["final_state"]
+                    st.session_state["show_report"] = True
+                    st.session_state["all_logs"] = data.get("logs", [])
+                    st.session_state["current_loaded_history"] = rep['id']
+                    st.rerun()
+        else:
+            if st.session_state.get("current_loaded_history") not in [None, "current"]:
+                # User clicked back to new session
+                st.session_state["current_loaded_history"] = "current"
+                if "report_result" in st.session_state:
+                    del st.session_state["report_result"]
+                st.session_state["show_report"] = False
+                st.rerun()
+    else:
+        st.info("No past research found.")
+
+    st.markdown("---")
     st.markdown("### 🤖 Model Settings")
 
     _GEMINI_MODELS = get_gemini_models(os.getenv("GEMINI_API_KEY", ""))
@@ -535,6 +566,11 @@ if generate_btn and topic.strip():
             st.session_state["report_result"] = final_state
             st.session_state["show_report"] = True
             st.session_state["all_logs"] = all_logs
+            st.session_state["current_loaded_history"] = "current"
+            
+            # Save to persistent history
+            save_report(topic.strip(), final_state, all_logs)
+            
             st.rerun()
 
     except Exception as e:
@@ -581,41 +617,34 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
     </div>
     """, unsafe_allow_html=True)
 
-    # Tabs for report, diagrams, logs
-    tab1, tab2, tab3, tab4 = st.tabs(["📄 Report", "📊 Diagrams", "📜 Agent Log", "⬇️ Export"])
+    # Tabs for Plan, Evidence, Markdown Preview, Images, Logs
+    tab_plan, tab_evidence, tab_preview, tab_images, tab_logs = st.tabs([
+        "🧩 Plan", "📚 Evidence", "📝 Markdown Preview", "🖼️ Images", "📜 Logs"
+    ])
 
-    with tab1:
-        st.markdown(
-            f'<div class="report-container">{__import__("markdown").markdown(report_md, extensions=["tables", "fenced_code"])}</div>',
-            unsafe_allow_html=True,
-        )
-
-    with tab2:
-        st.markdown("### 📊 Generated Diagrams")
-        sections = st.session_state.get("report_result", {})
-        # Try to extract any diagram JSON from completed sections in logs
-        # Show placeholder if none
-        st.info("Diagrams are generated for key sections flagged by the Orchestrator. If no diagrams appear here, the Orchestrator determined the topic didn't need visual explanation — you can re-run with a more technical topic.")
-
-        # Render any mermaid code blocks found in report
-        import re
-        mermaid_blocks = re.findall(r'```mermaid\n(.*?)\n```', report_md, re.DOTALL)
-        if mermaid_blocks:
-            for i, block in enumerate(mermaid_blocks):
-                st.markdown(f"**Diagram {i+1}:**")
-                render_mermaid(block)
+    with tab_plan:
+        st.markdown("### 🧩 Research Plan")
+        plan = result.get("plan")
+        if plan:
+            st.json(plan)
         else:
-            st.markdown("No Mermaid diagram blocks found in report.")
+            st.info("No plan data available.")
 
-    with tab3:
-        st.markdown("### 📜 Full Agent Execution Log")
-        log_text = "\n".join(all_logs)
-        st.code(log_text, language="text")
+    with tab_evidence:
+        st.markdown("### 📚 Gathered Evidence")
+        evidence = result.get("evidence", [])
+        if evidence:
+            for i, ev in enumerate(evidence):
+                with st.expander(f"Evidence {i+1}: {ev.get('title', 'Unknown')}"):
+                    st.markdown(f"**Source**: {ev.get('source', 'Unknown')}")
+                    st.markdown(f"**Type**: {ev.get('source_type', 'Unknown')}")
+                    st.markdown(f"**Content snippet**:\n> {ev.get('content', '')}")
+        else:
+            st.info("No evidence gathered.")
 
-    with tab4:
-        st.markdown("### ⬇️ Export Report")
+    with tab_preview:
+        # Put download buttons at the top of preview
         col_dl1, col_dl2 = st.columns(2)
-
         with col_dl1:
             st.download_button(
                 label="📄 Download Markdown",
@@ -625,7 +654,6 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
                 key="dl_md",
                 use_container_width=True,
             )
-
         with col_dl2:
             if pdf_path and Path(pdf_path).exists():
                 with open(pdf_path, "rb") as f:
@@ -637,5 +665,25 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
                         key="dl_pdf",
                         use_container_width=True,
                     )
-            else:
-                st.info("PDF export not available. Install reportlab: `pip install reportlab`")
+
+        st.markdown(
+            f'<div class="report-container">{__import__("markdown").markdown(report_md, extensions=["tables", "fenced_code"])}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with tab_images:
+        st.markdown("### 🖼️ Generated Images & Diagrams")
+        # Render any mermaid code blocks found in report
+        import re
+        mermaid_blocks = re.findall(r'```mermaid\n(.*?)\n```', report_md, re.DOTALL)
+        if mermaid_blocks:
+            for i, block in enumerate(mermaid_blocks):
+                st.markdown(f"**Diagram {i+1}:**")
+                render_mermaid(block)
+        else:
+            st.info("No images or diagrams were generated for this report.")
+
+    with tab_logs:
+        st.markdown("### 📜 Full Agent Execution Log")
+        log_text = "\n".join(all_logs)
+        st.code(log_text, language="text")
