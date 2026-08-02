@@ -670,9 +670,9 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
     </div>
     """, unsafe_allow_html=True)
 
-    # Tabs for Plan, Evidence, Markdown Preview, Images, Logs
-    tab_plan, tab_evidence, tab_preview, tab_images, tab_logs = st.tabs([
-        "🧩 Plan", "📚 Evidence", "📝 Markdown Preview", "🖼️ Images", "📜 Logs"
+    # Tabs for Plan, Evidence, Markdown Preview, Diagrams, Logs
+    tab_plan, tab_evidence, tab_preview, tab_diagrams, tab_logs = st.tabs([
+        "🧩 Plan", "📚 Evidence", "📝 Markdown Preview", "🖼️ Diagrams", "📜 Logs"
     ])
 
     with tab_plan:
@@ -724,27 +724,10 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
             unsafe_allow_html=True,
         )
 
-    with tab_images:
-        st.markdown("### 🖼️ Generated Images & Diagrams")
+    with tab_diagrams:
+        st.markdown("### 🖼️ Generated Diagrams")
         
-        # Show real AI-generated images first
-        generated_images = result.get("generated_images", [])
-        
-        if generated_images:
-            st.markdown(f"**{len(generated_images)} AI-generated image(s):**")
-            for img in generated_images:
-                b64 = img.get("base64_uri", "")
-                caption = img.get("caption", "Generated Image")
-                prompt = img.get("prompt", "")
-                method = img.get("method", "AI")
-                if b64:
-                    st.image(b64, caption=caption, use_container_width=True)
-                    with st.expander(f"🔍 Image prompt used"):
-                        st.markdown(f"**Method:** {method}")
-                        st.markdown(f"**Prompt:** _{prompt}_")
-            st.markdown("---")
-        
-        # Also render any Mermaid diagrams from the report
+        # Render any Mermaid diagrams from the report
         import re
         mermaid_blocks = re.findall(r'```mermaid\n(.*?)```', report_md, re.DOTALL)
         if mermaid_blocks:
@@ -752,9 +735,8 @@ if st.session_state.get("show_report") and "report_result" in st.session_state:
             for i, block in enumerate(mermaid_blocks):
                 st.markdown(f"**Diagram {i+1}:**")
                 render_mermaid(block)
-        
-        if not generated_images and not mermaid_blocks:
-            st.info("No images or diagrams were generated for this report.")
+        else:
+            st.info("No diagrams were generated for this report.")
 
     with tab_logs:
         st.markdown("### 📜 Full Agent Execution Log")

@@ -13,7 +13,6 @@ from backend.nodes.section_writer import section_writer_node
 from backend.nodes.stitcher import stitcher_node
 from backend.nodes.critic import critic_node
 from backend.nodes.diagram import diagram_node
-from backend.nodes.image_gen import image_gen_node
 from backend.rag.retriever import rag_research_node
 
 load_dotenv()
@@ -154,7 +153,6 @@ def build_graph() -> StateGraph:
     builder.add_node("stitcher", stitcher_node)
     builder.add_node("critic", critic_node)
     builder.add_node("diagram", diagram_node)
-    builder.add_node("image_gen", image_gen_node)
     builder.add_node("finalize", finalize_node)
 
     # Entry point
@@ -207,9 +205,8 @@ def build_graph() -> StateGraph:
         }
     )
 
-    # Diagram → Image Gen → Finalize
-    builder.add_edge("diagram", "image_gen")
-    builder.add_edge("image_gen", "finalize")
+    # Diagram → Finalize
+    builder.add_edge("diagram", "finalize")
     builder.add_edge("finalize", END)
 
     return builder.compile()
