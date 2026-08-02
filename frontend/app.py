@@ -1,763 +1,466 @@
-"""
-Research Intelligence Engine — Streamlit UI
-A beautiful, real-time streaming research report generator.
-"""
-import streamlit as st
-import sys
+from __future__ import annotations
+
+import json
 import os
-import time
-import tempfile
-import requests
+import re
+import zipfile
+from datetime import date
+from io import BytesIO
 from pathlib import Path
+from typing import Any, Dict, Optional, List, Iterator, Tuple
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pandas as pd
+import streamlit as st
 
-from dotenv import load_dotenv
-load_dotenv()
-
-from frontend.history import save_report, list_past_reports, load_report
-
-# ─── Streamlit Cloud: sync st.secrets → os.environ ─────────────────────────────
-# On Streamlit Cloud there is no .env file; API keys live in st.secrets.
-# We copy them into os.environ so all backend os.getenv() calls work unchanged.
-_SECRET_KEYS = [
-    "GEMINI_API_KEY", "GROQ_API_KEY", "TAVILY_API_KEY",
-    "PRIMARY_LLM", "GEMINI_MODEL", "GROQ_MODEL", "EMBEDDING_MODEL",
-    "CHUNK_SIZE", "CHUNK_OVERLAP", "RAG_TOP_K",
-    "MAX_CRITIQUE_RETRIES", "MAX_SECTIONS",
-]
-for _k in _SECRET_KEYS:
-    if _k not in os.environ:
-        try:
-            os.environ[_k] = str(st.secrets[_k])
-        except (KeyError, FileNotFoundError):
-            pass  # Not present in secrets — will fail gracefully at runtime
-
-# ─── Page config ──────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Research Intelligence Engine",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ─── Custom CSS ───────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-    /* Global */
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background: #000000; color: #ffffff; }
-
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background: #000000 !important;
-        border-right: 1px solid #333333;
-    }
-    [data-testid="stSidebar"] .stMarkdown h1,
-    [data-testid="stSidebar"] .stMarkdown h2,
-    [data-testid="stSidebar"] .stMarkdown h3 { color: #ffffff; }
-
-    /* Main header */
-    .rie-header {
-        background: #000000;
-        border: 1px solid #333333;
-        border-radius: 16px;
-        padding: 32px 40px;
-        margin-bottom: 28px;
-        position: relative;
-        overflow: hidden;
-    }
-    .rie-header::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        right: -10%;
-        width: 400px;
-        height: 400px;
-        background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
-        border-radius: 50%;
-    }
-    .rie-title {
-        font-size: 2.4rem;
-        font-weight: 700;
-        color: #ffffff;
-        margin: 0;
-        padding: 0;
-    }
-    .rie-subtitle {
-        color: #94a3b8;
-        font-size: 1rem;
-        margin-top: 8px;
-        font-weight: 400;
-    }
-
-    /* Progress log */
-    .progress-box {
-        background: #000000;
-        border: 1px solid #333333;
-        border-radius: 10px;
-        padding: 16px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.82rem;
-        color: #cccccc;
-        max-height: 280px;
-        overflow-y: auto;
-        line-height: 1.8;
-    }
-    .progress-item { color: #ffffff; }
-    .progress-item.error { color: #ff4444; }
-
-    /* Section card */
-    .section-card {
-        background: #000000;
-        border: 1px solid #333333;
-        border-left: 3px solid #ffffff;
-        border-radius: 12px;
-        padding: 20px 24px;
-        margin: 16px 0;
-        transition: all 0.3s ease;
-    }
-    .section-card:hover { border-left-color: #888888; }
-    .section-title { color: #ffffff; font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
-
-    /* Status badge */
-    .status-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 14px;
-        border-radius: 999px;
-        font-size: 0.85rem;
-        font-weight: 500;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        color: #ffffff;
-    }
-
-    /* Report display */
-    .report-container {
-        background: #000000;
-        border: 1px solid #333333;
-        border-radius: 12px;
-        padding: 32px 40px;
-        line-height: 1.8;
-        color: #e6edf3;
-    }
-    .report-container h1 { color: #ffffff; border-bottom: 1px solid #333333; padding-bottom: 12px; }
-    .report-container h2 { color: #eeeeee; }
-    .report-container h3 { color: #dddddd; }
-    .report-container code { background: #161b22; padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.9em; }
-    .report-container blockquote { border-left: 3px solid #888888; padding-left: 16px; color: #aaaaaa; margin: 16px 0; }
-
-    /* Metric cards */
-    .metric-row { display: flex; gap: 16px; margin: 20px 0; }
-    .metric-card {
-        flex: 1;
-        background: #000000;
-        border: 1px solid #333333;
-        border-radius: 10px;
-        padding: 16px 20px;
-        text-align: center;
-    }
-    .metric-value { font-size: 2rem; font-weight: 700; color: #ffffff; }
-    .metric-label { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
-
-    /* Buttons */
-    .stButton > button {
-        background: #222222;
-        color: white;
-        border: 1px solid #444444;
-        border-radius: 8px;
-        padding: 10px 24px;
-        font-weight: 600;
-        font-size: 0.95rem;
-        transition: all 0.3s ease;
-        width: 100%;
-    }
-    .stButton > button:hover {
-        background: #333333;
-        border-color: #666666;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
-    }
-
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] { background: #000000; border-bottom: 1px solid #333333; }
-    .stTabs [data-baseweb="tab"] { color: #888888; }
-    .stTabs [aria-selected="true"] { color: #ffffff; border-bottom: 2px solid #ffffff; }
-
-    /* File uploader */
-    [data-testid="stFileUploader"] {
-        background: #000000;
-        border: 2px dashed #333333;
-        border-radius: 10px;
-        padding: 16px;
-    }
-
-    /* Input fields */
-    .stTextInput input, .stTextArea textarea, .stSelectbox select {
-        background: #000000 !important;
-        border-color: #333333 !important;
-        color: #ffffff !important;
-    }
-    .stTextInput input:focus { border-color: #ffffff !important; }
-
-    /* Hide streamlit branding */
-    #MainMenu, footer, header { visibility: hidden; }
-
-    /* Diagram container */
-    .diagram-box {
-        background: #000000;
-        border: 1px solid #333333;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 12px 0;
-        overflow-x: auto;
-    }
-
-    /* Fix dropdown scroll */
-    ul[data-baseweb="menu"] {
-        max-height: 250px !important;
-        overflow-y: auto !important;
-    }
-    div[data-baseweb="popover"] {
-        max-height: 250px !important;
-        overflow-y: auto !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+# -----------------------------
+# Import your compiled LangGraph app
+# -----------------------------
+from backend.app import app
 
 
-# ─── Helper functions ──────────────────────────────────────────────────────────
+# -----------------------------
+# Helpers
+# -----------------------------
+def safe_slug(title: str) -> str:
+    s = title.strip().lower()
+    s = re.sub(r"[^a-z0-9 _-]+", "", s)
+    s = re.sub(r"\s+", "_", s).strip("_")
+    return s or "report"
 
-def render_mermaid(mermaid_code: str):
-    """Render a Mermaid diagram in Streamlit."""
-    html = f"""
-    <div class="diagram-box">
-        <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-        <script>mermaid.initialize({{startOnLoad:true, theme:'dark'}});</script>
-        <div class="mermaid">
-        {mermaid_code}
-        </div>
-    </div>
+
+def bundle_zip(md_text: str, md_filename: str, images_dir: Path) -> bytes:
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(md_filename, md_text.encode("utf-8"))
+
+        if images_dir.exists() and images_dir.is_dir():
+            for p in images_dir.rglob("*"):
+                if p.is_file():
+                    z.write(p, arcname=str(p))
+    return buf.getvalue()
+
+
+def images_zip(images_dir: Path) -> Optional[bytes]:
+    if not images_dir.exists() or not images_dir.is_dir():
+        return None
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for p in images_dir.rglob("*"):
+            if p.is_file():
+                z.write(p, arcname=str(p))
+    return buf.getvalue()
+
+
+def try_stream(graph_app, inputs: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
     """
-    st.components.v1.html(html, height=350)
-
-
-def display_progress(logs: list[str], placeholder):
-    """Display progress logs in the terminal-style box."""
-    log_html = "<br>".join([
-        f'<span class="progress-item {"error" if "fail" in l.lower() or "error" in l.lower() else ""}">{l}</span>'
-        for l in logs
-    ])
-    placeholder.markdown(
-        f'<div class="progress-box">{log_html}</div>',
-        unsafe_allow_html=True
-    )
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_gemini_models(api_key: str) -> list[str]:
-    """Fetch available text generation models from Gemini API."""
-    fallback = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
-    if not api_key: return fallback
+    Stream graph progress if available; else invoke.
+    Yields ("updates"/"values"/"final", payload).
+    """
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            models = res.json().get("models", [])
-            valid = [m["name"].replace("models/", "") for m in models if "generateContent" in m.get("supportedGenerationMethods", [])]
-            return sorted(valid, reverse=True) if valid else fallback
-    except:
+        for step in graph_app.stream(inputs, stream_mode="updates"):
+            yield ("updates", step)
+        out = graph_app.invoke(inputs)
+        yield ("final", out)
+        return
+    except Exception:
         pass
+
+    try:
+        for step in graph_app.stream(inputs, stream_mode="values"):
+            yield ("values", step)
+        out = graph_app.invoke(inputs)
+        yield ("final", out)
+        return
+    except Exception:
+        pass
+
+    out = graph_app.invoke(inputs)
+    yield ("final", out)
+
+
+def extract_latest_state(current_state: Dict[str, Any], step_payload: Any) -> Dict[str, Any]:
+    if isinstance(step_payload, dict):
+        if len(step_payload) == 1 and isinstance(next(iter(step_payload.values())), dict):
+            inner = next(iter(step_payload.values()))
+            current_state.update(inner)
+        else:
+            current_state.update(step_payload)
+    return current_state
+
+
+# -----------------------------
+# Markdown renderer that supports local images
+# -----------------------------
+_MD_IMG_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)]+)\)")
+_CAPTION_LINE_RE = re.compile(r"^\*(?P<cap>.+)\*$")
+
+
+def _resolve_image_path(src: str) -> Path:
+    src = src.strip().lstrip("./")
+    return Path(src).resolve()
+
+
+def render_markdown_with_local_images(md: str):
+    matches = list(_MD_IMG_RE.finditer(md))
+    if not matches:
+        st.markdown(md, unsafe_allow_html=False)
+        return
+
+    parts: List[Tuple[str, str]] = []
+    last = 0
+    for m in matches:
+        before = md[last : m.start()]
+        if before:
+            parts.append(("md", before))
+
+        alt = (m.group("alt") or "").strip()
+        src = (m.group("src") or "").strip()
+        parts.append(("img", f"{alt}|||{src}"))
+        last = m.end()
+
+    tail = md[last:]
+    if tail:
+        parts.append(("md", tail))
+
+    i = 0
+    while i < len(parts):
+        kind, payload = parts[i]
+
+        if kind == "md":
+            st.markdown(payload, unsafe_allow_html=False)
+            i += 1
+            continue
+
+        alt, src = payload.split("|||", 1)
+
+        caption = None
+        if i + 1 < len(parts) and parts[i + 1][0] == "md":
+            nxt = parts[i + 1][1].lstrip()
+            if nxt.strip():
+                first_line = nxt.splitlines()[0].strip()
+                mcap = _CAPTION_LINE_RE.match(first_line)
+                if mcap:
+                    caption = mcap.group("cap").strip()
+                    rest = "\n".join(nxt.splitlines()[1:])
+                    parts[i + 1] = ("md", rest)
+
+        if src.startswith("http://") or src.startswith("https://"):
+            st.image(src, caption=caption or (alt or None), use_container_width=True)
+        else:
+            img_path = _resolve_image_path(src)
+            if img_path.exists():
+                st.image(str(img_path), caption=caption or (alt or None), use_container_width=True)
+            else:
+                st.warning(f"Image not found: `{src}` (looked for `{img_path}`)")
+
+        i += 1
+
+
+# -----------------------------
+# ✅ NEW: Past reports helpers
+# -----------------------------
+def list_past_reports() -> List[Path]:
+    """
+    Returns .md files in current working directory, newest first.
+    Filters out obvious non-report markdown files if needed.
+    """
+    cwd = Path(".")
+    files = [p for p in cwd.glob("*.md") if p.is_file()]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files
+
+
+def read_md_file(p: Path) -> str:
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def extract_title_from_md(md: str, fallback: str) -> str:
+    """
+    Use first '# ' heading as title if present.
+    """
+    for line in md.splitlines():
+        if line.startswith("# "):
+            t = line[2:].strip()
+            return t or fallback
     return fallback
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_groq_models(api_key: str) -> list[str]:
-    """Fetch available models from Groq API."""
-    fallback = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
-    if not api_key: return fallback
-    try:
-        res = requests.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
-        if res.status_code == 200:
-            models = res.json().get("data", [])
-            valid = [m["id"] for m in models]
-            return sorted(valid) if valid else fallback
-    except:
-        pass
-    return fallback
 
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="Research Intelligence Engine", layout="wide")
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
+st.title("🔬 Research Intelligence Engine")
 
 with st.sidebar:
-    st.markdown("## ⚙️ Configuration")
-    st.markdown("---")
-
-    # API Key status
-    st.markdown("### 🔑 API Keys")
-    gemini_ok = bool(os.getenv("GEMINI_API_KEY"))
-    groq_ok = bool(os.getenv("GROQ_API_KEY"))
-    tavily_ok = bool(os.getenv("TAVILY_API_KEY"))
-
-    st.markdown(f"{'✅' if gemini_ok else '❌'} Gemini {'Connected' if gemini_ok else 'Not configured'}")
-    st.markdown(f"{'✅' if groq_ok else '❌'} Groq {'Connected' if groq_ok else 'Not configured'}")
-    st.markdown(f"{'✅' if tavily_ok else '❌'} Tavily {'Connected' if tavily_ok else 'Not configured'}")
-
-    st.markdown("---")
-    st.markdown("### 📂 Upload Documents (RAG)")
-    uploaded_files = st.file_uploader(
-        "Upload PDFs or text files",
-        type=["pdf", "txt", "md"],
-        accept_multiple_files=True,
-        help="Upload documents to use as a private knowledge base for your report",
-        key="doc_upload",
-    )
-
-    if uploaded_files:
-        if st.button("Index Documents", key="index_docs"):
-            from backend.rag.ingest import ingest_documents
-            with st.spinner("Indexing documents..."):
-                paths = []
-                for f in uploaded_files:
-                    tmp = tempfile.NamedTemporaryFile(
-                        delete=False, suffix=Path(f.name).suffix
-                    )
-                    tmp.write(f.read())
-                    tmp.close()
-                    paths.append(tmp.name)
-                try:
-                    n_chunks = ingest_documents(paths)
-                    if n_chunks == 0:
-                        st.warning("No chunks were indexed. Check your documents.")
-                    else:
-                        st.success(f"Indexed {n_chunks} chunks from {len(paths)} file(s)")
-                        st.session_state["doc_paths"] = paths
-                except Exception as e:
-                    from backend.utils.llm import EMBED_VERSION
-                    st.error(f"Indexing failed [{EMBED_VERSION}]: {type(e).__name__}: {str(e)}")
-                    st.info("Check that your GEMINI_API_KEY is valid and has access to the Embeddings API.")
-
-    st.markdown("---")
-    st.markdown("### 📚 Past Research")
-    from frontend.history import list_past_reports, load_report, delete_report, clear_all_reports
-    past_reports = list_past_reports()
-    
-    if past_reports:
-        options = ["Current / New Session"] + [f"{r['topic'][:35]}..." for r in past_reports]
-        selected_hist = st.radio("History", options, label_visibility="collapsed")
-        
-        if selected_hist != "Current / New Session":
-            idx = options.index(selected_hist) - 1
-            rep = past_reports[idx]
-            
-            # Show delete button for selected report
-            if st.button("🗑️ Delete Selected", key="del_selected", use_container_width=True):
-                if delete_report(rep['filename']):
-                    if st.session_state.get("current_loaded_history") == rep['id']:
-                        st.session_state["current_loaded_history"] = "current"
-                        if "report_result" in st.session_state:
-                            del st.session_state["report_result"]
-                        st.session_state["show_report"] = False
-                    st.rerun()
-                    
-            if st.session_state.get("current_loaded_history") != rep['id']:
-                data = load_report(rep['filename'])
-                if data:
-                    st.session_state["report_result"] = data["final_state"]
-                    st.session_state["show_report"] = True
-                    st.session_state["all_logs"] = data.get("logs", [])
-                    st.session_state["current_loaded_history"] = rep['id']
-                    st.rerun()
-        else:
-            if st.session_state.get("current_loaded_history") not in [None, "current"]:
-                # User clicked back to new session
-                st.session_state["current_loaded_history"] = "current"
-                if "report_result" in st.session_state:
-                    del st.session_state["report_result"]
-                st.session_state["show_report"] = False
-                st.rerun()
-                
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🗑️ Clear All History", key="clear_history", use_container_width=True):
-            clear_all_reports()
-            st.session_state["current_loaded_history"] = "current"
-            if "report_result" in st.session_state:
-                del st.session_state["report_result"]
-            st.session_state["show_report"] = False
-            st.rerun()
-    else:
-        st.info("No past research found.")
-
-    st.markdown("---")
-    st.markdown("### 🤖 Model Settings")
-
-    _GEMINI_MODELS = get_gemini_models(os.getenv("GEMINI_API_KEY", ""))
-    _GROQ_MODELS = get_groq_models(os.getenv("GROQ_API_KEY", ""))
-
-    primary_llm = st.selectbox(
-        "Provider",
-        ["gemini", "groq"],
-        index=0,
-        key="primary_llm",
-        help="Choose the LLM provider for report generation",
-    )
-    os.environ["PRIMARY_LLM"] = primary_llm
-
-    if primary_llm == "gemini":
-        default_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-        if default_model not in _GEMINI_MODELS:
-            _GEMINI_MODELS.insert(0, default_model)
-        
-        chosen_model = st.selectbox(
-            "Gemini Model",
-            _GEMINI_MODELS,
-            index=_GEMINI_MODELS.index(default_model),
-            key="gemini_model_select",
-            help="Select from available Gemini models",
-        )
-        os.environ["GEMINI_MODEL"] = chosen_model
-        st.caption(f"🟣 Using **{chosen_model}**")
-    else:
-        default_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        if default_model not in _GROQ_MODELS:
-            _GROQ_MODELS.insert(0, default_model)
-            
-        chosen_model = st.selectbox(
-            "Groq Model",
-            _GROQ_MODELS,
-            index=_GROQ_MODELS.index(default_model),
-            key="groq_model_select",
-            help="Select from available Groq models",
-        )
-        os.environ["GROQ_MODEL"] = chosen_model
-        st.caption(f"🟠 Using **{chosen_model}**")
-
-    st.markdown("---")
-    st.markdown("### 🗑️ Manage Knowledge Base")
-    if st.button("Clear Vector Store", key="clear_vs"):
-        from backend.rag.ingest import clear_vectorstore
-        clear_vectorstore()
-        st.success("Vector store cleared!")
-
-    st.markdown("---")
-    st.markdown("""
-    <div style="color: #475569; font-size: 0.75rem; text-align: center;">
-    Research Intelligence Engine<br>
-    Powered by LangGraph + Gemini + Groq
-    </div>
-    """, unsafe_allow_html=True)
-
-
-# ─── Main layout ──────────────────────────────────────────────────────────────
-
-st.markdown("""
-<div class="rie-header">
-    <h1 class="rie-title">🔬 Research Intelligence Engine</h1>
-    <p class="rie-subtitle">
-        Autonomous multi-agent research reports powered by LangGraph · Orchestrator-Worker-Critic architecture · RAG + Web Search
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-# Input section
-col1, col2 = st.columns([3, 1])
-
-with col1:
+    st.header("Generate New Research Report")
     topic = st.text_area(
-        "📌 Research Topic",
-        placeholder="e.g., 'LangGraph vs AutoGen: Technical Deep-Dive for AI Engineers'\n'State of Agentic AI in 2025: Key Frameworks and Patterns'\n'Vector Databases Compared: Pinecone vs Weaviate vs FAISS'",
-        height=100,
-        key="topic_input",
+        "Topic",
+        height=120,
     )
+    as_of = st.date_input("As-of date", value=date.today())
+    run_btn = st.button("🚀 Generate Report", type="primary")
 
-with col2:
-    audience = st.selectbox(
-        "👥 Target Audience",
-        ["ML/AI Engineers", "Software Architects", "Startup Founders", "Product Managers", "General Technical"],
-        key="audience_select",
-    )
-    tone = st.selectbox(
-        "🎨 Report Tone",
-        ["Analytical", "Technical Deep-Dive", "Executive Summary", "Academic"],
-        key="tone_select",
-    )
+    # ✅ NEW: Past reports list (keeps everything else intact)
+    st.divider()
+    st.subheader("Past reports")
 
-col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
-with col_btn1:
-    generate_btn = st.button("🚀 Generate Research Report", key="generate_btn", use_container_width=True)
-with col_btn2:
-    if st.button("📋 Example Topics", key="examples_btn", use_container_width=True):
-        st.session_state["show_examples"] = not st.session_state.get("show_examples", False)
-with col_btn3:
-    if st.button("🔄 Reset", key="reset_btn", use_container_width=True):
-        for key in ["report_result", "show_report"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        st.rerun()
+    past_files = list_past_reports()
+    if not past_files:
+        st.caption("No saved reports found (*.md in current folder).")
+        selected_md_file = None
+    else:
+        # Build labels from file name + (optional) parsed title
+        options: List[str] = []
+        file_by_label: Dict[str, Path] = {}
+        for p in past_files[:50]:
+            try:
+                md_text = read_md_file(p)
+                title = extract_title_from_md(md_text, p.stem)
+            except Exception:
+                title = p.stem
+            label = f"{title}  ·  {p.name}"
+            options.append(label)
+            file_by_label[label] = p
 
-# Example topics
-if st.session_state.get("show_examples"):
-    st.markdown("""
-    <div style="background: #111128; border: 1px solid #1e1e3f; border-radius: 10px; padding: 16px; margin: 12px 0;">
-    <b style="color: #a78bfa;">💡 Example Topics to try:</b><br><br>
-    • <code>LangGraph vs AutoGen vs CrewAI: A Technical Comparison for Production AI Systems</code><br>
-    • <code>Vector Databases in 2025: Pinecone vs Weaviate vs FAISS vs Chroma</code><br>
-    • <code>The Rise of Agentic AI: Patterns, Pitfalls, and Production Lessons</code><br>
-    • <code>RAG vs Fine-Tuning: When to Use Each Approach for LLM Applications</code><br>
-    • <code>Kubernetes vs Serverless for ML Model Serving: A Cost and Performance Analysis</code>
-    </div>
-    """, unsafe_allow_html=True)
+        selected_label = st.radio(
+            "Select a report to load",
+            options=options,
+            index=0,
+            label_visibility="collapsed",
+        )
+        selected_md_file = file_by_label.get(selected_label)
 
+        if st.button("📂 Load selected report"):
+            if selected_md_file:
+                md_text = read_md_file(selected_md_file)
+                # Load into session_state as if it were a run output
+                st.session_state["last_out"] = {
+                    "plan": None,          # old files don't include plan
+                    "evidence": [],        # old files don't include evidence
+                    "image_specs": [],     # optional (not persisted)
+                    "final": md_text,      # markdown body
+                }
+                # also update the topic input to the title (best-effort) without changing UI
+                st.session_state["topic_prefill"] = extract_title_from_md(md_text, selected_md_file.stem)
 
-# ─── Generation flow ──────────────────────────────────────────────────────────
+    
 
-if generate_btn and topic.strip():
-    from backend.graph import get_graph
-    from backend.state import ResearchState
+# Keep your topic input as-is; optionally prefill for next run after loading a report
+if "topic_prefill" in st.session_state and isinstance(st.session_state["topic_prefill"], str):
+    # Do not mutate widgets; just keep as a hint.
+    pass
 
-    graph = get_graph()
+# Storage for latest run
+if "last_out" not in st.session_state:
+    st.session_state["last_out"] = None
 
-    # Status area
-    st.markdown("---")
-    st.markdown("### ⚡ Agent Progress")
+# Layout
+tab_plan, tab_evidence, tab_preview, tab_images, tab_logs = st.tabs(
+    ["🧩 Plan", "🔎 Evidence", "📝 Markdown Preview", "🖼️ Images", "🧾 Logs"]
+)
 
-    status_placeholder = st.empty()
-    progress_placeholder = st.empty()
-    section_placeholder = st.empty()
-
-    all_logs = []
-    sections_seen = []
-    final_state = None
-
-    initial_state = ResearchState(
-        topic=topic.strip(),
-        audience=audience,
-        tone=tone.lower().replace(" ", "_"),
-        uploaded_doc_paths=st.session_state.get("doc_paths", []),
-    )
-
-    try:
-        cumulative_state = initial_state.model_dump()
-        
-        def _to_dict(obj):
-            if hasattr(obj, "model_dump"):
-                return obj.model_dump()
-            if isinstance(obj, list):
-                return [_to_dict(x) for x in obj]
-            if isinstance(obj, dict):
-                return {k: _to_dict(v) for k, v in obj.items()}
-            return obj
-
-        # Stream graph execution
-        for event in graph.stream(
-            cumulative_state,
-            stream_mode="updates",
-            config={"recursion_limit": 50},
-        ):
-            for node_name, node_output in event.items():
-                if isinstance(node_output, dict):
-                    # Aggregate state manually since stream_mode="updates" only yields diffs
-                    for key, value in node_output.items():
-                        clean_value = _to_dict(value)
-                        if key in ["evidence", "completed_sections", "progress_log"]:
-                            if key not in cumulative_state or not cumulative_state[key]:
-                                cumulative_state[key] = []
-                            cumulative_state[key].extend(clean_value)
-                        else:
-                            cumulative_state[key] = clean_value
-
-                    # Update status
-                    status = node_output.get("status", "")
-                    if status:
-                        status_placeholder.markdown(
-                            f'<div class="status-badge">⚡ {status}</div>',
-                            unsafe_allow_html=True
-                        )
-
-                    # Collect logs
-                    logs = node_output.get("progress_log", [])
-                    if logs:
-                        all_logs.extend([f"[{node_name}] {l}" for l in logs])
-                        display_progress(all_logs, progress_placeholder)
-
-                    # Show sections as they appear
-                    new_sections = node_output.get("completed_sections", [])
-                    if new_sections:
-                        sections_seen.extend(new_sections)
-                        section_html = ""
-                        for s in sections_seen[-3:]:  # Show last 3
-                            sec_obj = s if isinstance(s, dict) else s.model_dump() if hasattr(s, 'model_dump') else {}
-                            title = sec_obj.get('title', str(s)[:50]) if sec_obj else str(s)[:50]
-                            wc = sec_obj.get('word_count', '?') if sec_obj else '?'
-                            section_html += f"""
-                            <div class="section-card">
-                                <div class="section-title">✍️ {title}</div>
-                                <div style="color: #64748b; font-size: 0.8rem;">~{wc} words written</div>
-                            </div>
-                            """
-                        section_placeholder.markdown(section_html, unsafe_allow_html=True)
-
-                    # Capture final state pieces
-                    if "final_report" in node_output and node_output["final_report"]:
-                        final_state = cumulative_state
-
-        # Store result
-        if final_state:
-            st.session_state["report_result"] = final_state
-            st.session_state["show_report"] = True
-            st.session_state["all_logs"] = all_logs
-            st.session_state["current_loaded_history"] = "current"
-            
-            # Save to persistent history
-            save_report(topic.strip(), final_state, all_logs)
-            
-            st.rerun()
-
-    except Exception as e:
-        error_msg = str(e)
-        if "RESOURCE_EXHAUSTED" in error_msg or "429" in error_msg:
-            st.error("❌ **API Rate Limit Reached!**")
-            st.warning(
-                "You have exhausted your free tier quota for the selected model (likely Gemini). "
-                "**Please scroll down to '🤖 Model Settings' and switch the Provider to 'groq'** to continue generating reports using Llama models!"
-            )
-        else:
-            st.error(f"❌ Generation failed: {e}")
-            import traceback
-            with st.expander("Show detailed error log"):
-                st.code(traceback.format_exc(), language="python")
-
-elif generate_btn:
-    st.warning("⚠️ Please enter a research topic!")
+logs: List[str] = []
 
 
-# ─── Report display ───────────────────────────────────────────────────────────
+def log(msg: str):
+    logs.append(msg)
 
-if st.session_state.get("show_report") and "report_result" in st.session_state:
-    result = st.session_state["report_result"]
-    report_md = result.get("final_report", "")
-    pdf_path = result.get("pdf_path", "")
 
-    st.markdown("---")
+if run_btn:
+    if not topic.strip():
+        st.warning("Please enter a topic.")
+        st.stop()
 
-    # Metrics row
-    word_count = len(report_md.split())
-    section_count = report_md.count("## ")
-    all_logs = st.session_state.get("all_logs", [])
+    inputs: Dict[str, Any] = {
+        "topic": topic.strip(),
+        "mode": "",
+        "needs_research": False,
+        "queries": [],
+        "evidence": [],
+        "plan": None,
+        "as_of": as_of.isoformat(),
+        "recency_days": 7,
+        "sections": [],
+        "merged_md": "",
+        "md_with_placeholders": "",
+        "image_specs": [],
+        "final": "",
+    }
 
-    st.markdown(f"""
-    <div class="metric-row">
-        <div class="metric-card">
-            <div class="metric-value">{word_count:,}</div>
-            <div class="metric-label">Total Words</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{section_count}</div>
-            <div class="metric-label">Sections Generated</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{len(all_logs)}</div>
-            <div class="metric-label">Agent Steps</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{"✅" if pdf_path else "⚠️"}</div>
-            <div class="metric-label">PDF {'Ready' if pdf_path else 'Unavailable'}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    status = st.status("Running graph…", expanded=True)
+    progress_area = st.empty()
 
-    # Tabs for Plan, Evidence, Markdown Preview, Images, Logs
-    tab_plan, tab_evidence, tab_preview, tab_images, tab_logs = st.tabs([
-        "🧩 Plan", "📚 Evidence", "📝 Markdown Preview", "🖼️ Images", "📜 Logs"
-    ])
+    current_state: Dict[str, Any] = {}
+    last_node = None
 
+    for kind, payload in try_stream(app, inputs):
+        if kind in ("updates", "values"):
+            node_name = None
+            if isinstance(payload, dict) and len(payload) == 1 and isinstance(next(iter(payload.values())), dict):
+                node_name = next(iter(payload.keys()))
+            if node_name and node_name != last_node:
+                status.write(f"➡️ Node: `{node_name}`")
+                last_node = node_name
+
+            current_state = extract_latest_state(current_state, payload)
+
+            summary = {
+                "mode": current_state.get("mode"),
+                "needs_research": current_state.get("needs_research"),
+                "queries": current_state.get("queries", [])[:5] if isinstance(current_state.get("queries"), list) else [],
+                "evidence_count": len(current_state.get("evidence", []) or []),
+                "tasks": len((current_state.get("plan") or {}).get("tasks", [])) if isinstance(current_state.get("plan"), dict) else None,
+                "images": len(current_state.get("image_specs", []) or []),
+                "sections_done": len(current_state.get("sections", []) or []),
+            }
+            progress_area.json(summary)
+
+            log(f"[{kind}] {json.dumps(payload, default=str)[:1200]}")
+
+        elif kind == "final":
+            out = payload
+            st.session_state["last_out"] = out
+            status.update(label="✅ Done", state="complete", expanded=False)
+            log("[final] received final state")
+
+# Render last result (if any)
+out = st.session_state.get("last_out")
+if out:
+    # --- Plan tab ---
     with tab_plan:
-        st.markdown("### 🧩 Research Plan")
-        plan = result.get("plan")
-        if plan:
-            st.json(plan)
+        st.subheader("Plan")
+        plan_obj = out.get("plan")
+        if not plan_obj:
+            st.info("No plan found in output.")
         else:
-            st.info("No plan data available.")
+            if hasattr(plan_obj, "model_dump"):
+                plan_dict = plan_obj.model_dump()
+            elif isinstance(plan_obj, dict):
+                plan_dict = plan_obj
+            else:
+                plan_dict = json.loads(json.dumps(plan_obj, default=str))
 
+            st.write("**Title:**", plan_dict.get("report_title"))
+            cols = st.columns(3)
+            cols[0].write("**Audience:** " + str(plan_dict.get("audience")))
+            cols[1].write("**Tone:** " + str(plan_dict.get("tone")))
+            cols[2].write("**Report kind:** " + str(plan_dict.get("report_kind", "")))
+
+            tasks = plan_dict.get("tasks", [])
+            if tasks:
+                df = pd.DataFrame(
+                    [
+                        {
+                            "id": t.get("id"),
+                            "title": t.get("title"),
+                            "target_words": t.get("target_words"),
+                            "requires_research": t.get("requires_research"),
+                            "requires_citations": t.get("requires_citations"),
+                            "requires_code": t.get("requires_code"),
+                            "tags": ", ".join(t.get("tags") or []),
+                        }
+                        for t in tasks
+                    ]
+                ).sort_values("id")
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                with st.expander("Task details"):
+                    st.json(tasks)
+
+    # --- Evidence tab ---
     with tab_evidence:
-        st.markdown("### 📚 Gathered Evidence")
-        evidence = result.get("evidence", [])
-        if evidence:
-            for i, ev in enumerate(evidence):
-                with st.expander(f"Evidence {i+1}: {ev.get('title', 'Unknown')}"):
-                    st.markdown(f"**Source**: {ev.get('source', 'Unknown')}")
-                    st.markdown(f"**Type**: {ev.get('source_type', 'Unknown')}")
-                    st.markdown(f"**Content snippet**:\n> {ev.get('content', '')}")
+        st.subheader("Evidence")
+        evidence = out.get("evidence") or []
+        if not evidence:
+            st.info("No evidence returned (maybe closed_book mode or no Tavily key/results).")
         else:
-            st.info("No evidence gathered.")
+            rows = []
+            for e in evidence:
+                if hasattr(e, "model_dump"):
+                    e = e.model_dump()
+                rows.append(
+                    {
+                        "title": e.get("title"),
+                        "published_at": e.get("published_at"),
+                        "source": e.get("source"),
+                        "url": e.get("url"),
+                    }
+                )
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+    # --- Preview tab ---
     with tab_preview:
-        # Put download buttons at the top of preview
-        col_dl1, col_dl2 = st.columns(2)
-        with col_dl1:
+        st.subheader("Markdown Preview")
+        final_md = out.get("final") or ""
+        if not final_md:
+            st.warning("No final markdown found.")
+        else:
+            render_markdown_with_local_images(final_md)
+
+            plan_obj = out.get("plan")
+            if hasattr(plan_obj, "report_title"):
+                report_title = plan_obj.report_title
+            elif isinstance(plan_obj, dict):
+                report_title = plan_obj.get("report_title", "report")
+            else:
+                # fallback: parse from markdown title
+                report_title = extract_title_from_md(final_md, "report")
+
+            md_filename = f"{safe_slug(report_title)}.md"
             st.download_button(
-                label="📄 Download Markdown",
-                data=report_md,
-                file_name="research_report.md",
+                "⬇️ Download Markdown",
+                data=final_md.encode("utf-8"),
+                file_name=md_filename,
                 mime="text/markdown",
-                key="dl_md",
-                use_container_width=True,
             )
-        with col_dl2:
-            if pdf_path and Path(pdf_path).exists():
-                with open(pdf_path, "rb") as f:
+
+            bundle = bundle_zip(final_md, md_filename, Path("images"))
+            st.download_button(
+                "📦 Download Bundle (MD + images)",
+                data=bundle,
+                file_name=f"{safe_slug(report_title)}_bundle.zip",
+                mime="application/zip",
+            )
+
+    # --- Images tab ---
+    with tab_images:
+        st.subheader("Images")
+        specs = out.get("image_specs") or []
+        images_dir = Path("images")
+
+        if not specs and not images_dir.exists():
+            st.info("No images generated for this report.")
+        else:
+            if specs:
+                st.write("**Image plan:**")
+                st.json(specs)
+
+            if images_dir.exists():
+                files = [p for p in images_dir.iterdir() if p.is_file()]
+                if not files:
+                    st.warning("images/ exists but is empty.")
+                else:
+                    for p in sorted(files):
+                        st.image(str(p), caption=p.name, use_container_width=True)
+
+                z = images_zip(images_dir)
+                if z:
                     st.download_button(
-                        label="📕 Download PDF",
-                        data=f.read(),
-                        file_name=Path(pdf_path).name,
-                        mime="application/pdf",
-                        key="dl_pdf",
-                        use_container_width=True,
+                        "⬇️ Download Images (zip)",
+                        data=z,
+                        file_name="images.zip",
+                        mime="application/zip",
                     )
 
-        st.markdown(
-            f'<div class="report-container">{__import__("markdown").markdown(report_md, extensions=["tables", "fenced_code"])}</div>',
-            unsafe_allow_html=True,
-        )
-
-    with tab_images:
-        st.markdown("### 🖼️ Generated Images & Diagrams")
-        
-        # Show real AI-generated images first
-        generated_images = result.get("generated_images", [])
-        
-        if generated_images:
-            st.markdown(f"**{len(generated_images)} AI-generated image(s):**")
-            for img in generated_images:
-                b64 = img.get("base64_uri", "")
-                caption = img.get("caption", "Generated Image")
-                prompt = img.get("prompt", "")
-                method = img.get("method", "AI")
-                if b64:
-                    st.image(b64, caption=caption, use_container_width=True)
-                    with st.expander(f"🔍 Image prompt used"):
-                        st.markdown(f"**Method:** {method}")
-                        st.markdown(f"**Prompt:** _{prompt}_")
-            st.markdown("---")
-        
-        # Also render any Mermaid diagrams from the report
-        import re
-        mermaid_blocks = re.findall(r'```mermaid\n(.*?)```', report_md, re.DOTALL)
-        if mermaid_blocks:
-            st.markdown(f"**{len(mermaid_blocks)} Mermaid diagram(s):**")
-            for i, block in enumerate(mermaid_blocks):
-                st.markdown(f"**Diagram {i+1}:**")
-                render_mermaid(block)
-        
-        if not generated_images and not mermaid_blocks:
-            st.info("No images or diagrams were generated for this report.")
-
+    # --- Logs tab ---
     with tab_logs:
-        st.markdown("### 📜 Full Agent Execution Log")
-        log_text = "\n".join(all_logs)
-        st.code(log_text, language="text")
+        st.subheader("Logs")
+        if "logs" not in st.session_state:
+            st.session_state["logs"] = []
+        if logs:
+            st.session_state["logs"].extend(logs)
 
+        st.text_area("Event log", value="\n\n".join(st.session_state["logs"][-80:]), height=520)
+else:
+    st.info("Enter a topic and click **Generate Report**.")
