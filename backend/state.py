@@ -87,7 +87,6 @@ class ResearchState(BaseModel):
     critique: Optional[CritiqueResult] = None
     final_report: str = ""
     pdf_path: str = ""
-    generated_images: list[dict] = Field(default_factory=list)  # Images created by image_gen_node
 
     # Streaming status
     status: str = "idle"
