@@ -124,8 +124,8 @@ Section Content: {section_content}
 Generate a Mermaid flowchart diagram that:
 - Captures the most important relationship or process in this section
 - Is clear and not overly complex (max 10 nodes)
-- Uses descriptive labels
 - ONLY uses standard flowchart syntax (graph TD or graph LR)
 - Uses standard arrows (--> or -.->). DO NOT use |> or other invalid characters.
+- CRITICAL: Do NOT use parentheses (), brackets [], or special characters like & < > in node labels unless you wrap the label in quotes (e.g., A["Label (with parens)"]).
 
 Return ONLY valid Mermaid syntax, nothing else. Start with 'graph TD' or 'graph LR'."""

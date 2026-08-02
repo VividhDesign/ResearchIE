@@ -39,12 +39,20 @@ def diagram_node(state: ResearchState) -> dict:
                 response = llm.invoke([HumanMessage(content=prompt)])
                 mermaid_code = extract_text(response.content).strip()
 
-                # Clean up code fences if present
-                if mermaid_code.startswith("```"):
-                    lines = mermaid_code.split("\n")
-                    mermaid_code = "\n".join(
-                        lines[1:-1] if lines[-1].startswith("```") else lines[1:]
-                    )
+                mermaid_code = extract_text(response.content).strip()
+
+                # Robustly extract just the mermaid code if the LLM added conversational text
+                import re
+                match = re.search(r'```(?:mermaid)?\n(.*?)```', mermaid_code, re.DOTALL)
+                if match:
+                    mermaid_code = match.group(1).strip()
+                else:
+                    # If no code blocks, assume the whole response is the diagram (strip just in case)
+                    mermaid_code = mermaid_code.strip()
+                    if mermaid_code.startswith("graph ") or mermaid_code.startswith("flowchart "):
+                        pass # It looks like raw mermaid
+                    else:
+                        raise ValueError("LLM did not return valid mermaid syntax")
 
                 updated_sections.append(SectionResultWithDiagram(
                     title=section.title,
