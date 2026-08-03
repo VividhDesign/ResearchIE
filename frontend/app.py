@@ -297,8 +297,19 @@ with st.sidebar:
     st.markdown("## ⚙️ Configuration")
     st.markdown("---")
 
-    # API Key status
+    # API Key status and inputs
     st.markdown("### 🔑 API Keys")
+    st.caption("Provide your own API keys to avoid rate limits.")
+    
+    gemini_key = st.text_input("Gemini API Key", type="password", key="custom_gemini_key")
+    if gemini_key: os.environ["GEMINI_API_KEY"] = gemini_key
+        
+    groq_key = st.text_input("Groq API Key", type="password", key="custom_groq_key")
+    if groq_key: os.environ["GROQ_API_KEY"] = groq_key
+        
+    tavily_key = st.text_input("Tavily API Key", type="password", key="custom_tavily_key")
+    if tavily_key: os.environ["TAVILY_API_KEY"] = tavily_key
+
     gemini_ok = bool(os.getenv("GEMINI_API_KEY"))
     groq_ok = bool(os.getenv("GROQ_API_KEY"))
     tavily_ok = bool(os.getenv("TAVILY_API_KEY"))
